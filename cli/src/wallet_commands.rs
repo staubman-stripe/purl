@@ -26,6 +26,7 @@ fn short_address_link(address: &str, chain_type: &str) -> String {
     let network = match chain_type {
         "evm" | "EVM" => "base",
         "solana" | "Solana" => "solana",
+        "tempo" | "Tempo" => "tempo",
         _ => return short,
     };
 
@@ -114,6 +115,9 @@ pub fn list_command() -> Result<()> {
         if let Ok(content) = std::fs::read_to_string(&keystore_path) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                 // Detect chain type and get identifier
+                // Check for explicit chain marker first
+                let explicit_chain = json["chain"].as_str();
+
                 let (chain_type, display_identifier) =
                     if let Some(address) = json["address"].as_str() {
                         let addr = if address.starts_with("0x") {
@@ -121,8 +125,14 @@ pub fn list_command() -> Result<()> {
                         } else {
                             format!("0x{address}")
                         };
-                        let display = short_address_link(&addr, "evm");
-                        ("evm".to_string(), display)
+                        // Check if this is a Tempo wallet
+                        let chain = if explicit_chain == Some("tempo") {
+                            "tempo"
+                        } else {
+                            "evm"
+                        };
+                        let display = short_address_link(&addr, chain);
+                        (chain.to_string(), display)
                     } else if let Some(pubkey) = json["public_key"].as_str() {
                         let display = short_address_link(pubkey, "solana");
                         ("solana".to_string(), display)
@@ -134,7 +144,7 @@ pub fn list_command() -> Result<()> {
 
                 // Determine if this keystore is active
                 let is_active = match chain_type.as_str() {
-                    "evm" => canonical_path
+                    "evm" | "tempo" => canonical_path
                         .as_ref()
                         .map(|p| active_evm_path.as_ref() == Some(p))
                         .unwrap_or(false),
@@ -250,6 +260,11 @@ pub fn add_command(
                 "(Ethereum, Base, Polygon, ...)".dimmed()
             ),
             format!("{}", "Solana".cyan()),
+            format!(
+                "{} {}",
+                "Tempo".cyan(),
+                "(Tempo network, explore.tempo.xyz)".dimmed()
+            ),
         ];
 
         let selection = Select::new()
@@ -260,7 +275,8 @@ pub fn add_command(
 
         match selection {
             0 => WalletType::Evm,
-            _ => WalletType::Solana,
+            1 => WalletType::Solana,
+            _ => WalletType::Tempo,
         }
     };
 
@@ -279,7 +295,9 @@ pub fn add_command(
         if selection == 1 {
             // Import: prompt for key with validation, retry on error
             let prompt = match wallet_type {
-                WalletType::Evm => "Enter private key (hex, with or without 0x prefix)",
+                WalletType::Evm | WalletType::Tempo => {
+                    "Enter private key (hex, with or without 0x prefix)"
+                }
                 WalletType::Solana => "Enter private key (base58 encoded)",
             };
 
@@ -289,7 +307,7 @@ pub fn add_command(
 
                 // Validate key format immediately
                 let result = match wallet_type {
-                    WalletType::Evm => purl_lib::crypto::validate_evm_key(&key),
+                    WalletType::Evm | WalletType::Tempo => purl_lib::crypto::validate_evm_key(&key),
                     WalletType::Solana => purl_lib::crypto::validate_solana_keypair(&key),
                 };
 
@@ -309,7 +327,7 @@ pub fn add_command(
 
     // Step 3: Generate key if needed
     let (private_key_value, display_info) = match wallet_type {
-        WalletType::Evm => {
+        WalletType::Evm | WalletType::Tempo => {
             let key = if is_generate {
                 use alloy_signer_local::PrivateKeySigner;
                 use rand::Rng;
@@ -341,7 +359,12 @@ pub fn add_command(
             } else {
                 key_to_import.unwrap()
             };
-            (key, "EVM")
+            let display = if matches!(wallet_type, WalletType::Tempo) {
+                "Tempo"
+            } else {
+                "EVM"
+            };
+            (key, display)
         }
         WalletType::Solana => {
             let keypair_b58 = if is_generate {
@@ -382,6 +405,7 @@ pub fn add_command(
     let default_name = match wallet_type {
         WalletType::Evm => "evm",
         WalletType::Solana => "solana",
+        WalletType::Tempo => "tempo",
     };
 
     let wallet_name = if let Some(n) = name {
@@ -399,6 +423,21 @@ pub fn add_command(
             .context("Failed to create EVM wallet")?,
         WalletType::Solana => create_solana_keystore(&private_key_value, &password, &wallet_name)
             .context("Failed to create Solana wallet")?,
+        WalletType::Tempo => {
+            // Tempo uses same keystore format as EVM but we add a marker
+            let path = create_keystore(&private_key_value, &password, &wallet_name)
+                .context("Failed to create Tempo wallet")?;
+            // Add chain marker to identify this as a Tempo wallet
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    json["chain"] = serde_json::Value::String("tempo".to_string());
+                    if let Ok(updated) = serde_json::to_string_pretty(&json) {
+                        let _ = std::fs::write(&path, updated);
+                    }
+                }
+            }
+            path
+        }
     };
 
     // Step 7: Create config file if it doesn't exist
@@ -417,7 +456,7 @@ pub fn add_command(
     if let Ok(content) = std::fs::read_to_string(&keystore_path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             let address = match wallet_type {
-                WalletType::Evm => json["address"].as_str().map(|a| {
+                WalletType::Evm | WalletType::Tempo => json["address"].as_str().map(|a| {
                     if a.starts_with("0x") {
                         a.to_string()
                     } else {
@@ -448,7 +487,8 @@ pub fn add_command(
 
     if set_active {
         match wallet_type {
-            WalletType::Evm => {
+            WalletType::Evm | WalletType::Tempo => {
+                // Tempo uses EVM-compatible addresses, so configure as EVM
                 let evm_config = config.evm.get_or_insert_with(Default::default);
                 evm_config.keystore = Some(keystore_path.clone());
             }
@@ -540,7 +580,12 @@ pub fn show_command(name: &str) -> Result<()> {
 
     // Detect chain type from keystore content
     let chain_type = if keystore.content.get("address").is_some() {
-        "EVM"
+        // Check for explicit Tempo marker
+        if keystore.content.get("chain").and_then(|v| v.as_str()) == Some("tempo") {
+            "Tempo"
+        } else {
+            "EVM"
+        }
     } else if keystore.content.get("public_key").is_some()
         || keystore.content.get("keypair").is_some()
     {
@@ -640,7 +685,8 @@ pub fn verify_command(name: &str, password: Option<String>) -> Result<()> {
 
     match keystore.content.get("chain").and_then(|v| v.as_str()) {
         Some("solana") => verify_solana_wallet(&keystore, &keystore_path, password),
-        _ => verify_evm_wallet(&keystore, password),
+        Some("tempo") => verify_evm_wallet(&keystore, "Tempo", password),
+        _ => verify_evm_wallet(&keystore, "EVM", password),
     }
 }
 
@@ -727,8 +773,8 @@ fn verify_solana_wallet(
     Ok(())
 }
 
-/// Verify an EVM wallet
-fn verify_evm_wallet(keystore: &Keystore, password: Option<String>) -> Result<()> {
+/// Verify an EVM/Tempo wallet
+fn verify_evm_wallet(keystore: &Keystore, chain_type: &str, password: Option<String>) -> Result<()> {
     match keystore.validate() {
         Ok(()) => {
             println!("{} Wallet format is valid", "[OK]".green());
@@ -771,13 +817,13 @@ fn verify_evm_wallet(keystore: &Keystore, password: Option<String>) -> Result<()
                             println!("{} Address derivation matches", "[OK]".green());
                             println!("{}", "Verification successful!".green());
                             let full_addr = format!("0x{stored_address}");
-                            let linked = wallet_link(&full_addr, "EVM");
+                            let linked = wallet_link(&full_addr, chain_type);
                             println!("Address: {}", linked.yellow());
                         } else {
                             println!("{} Address mismatch!", "[FAIL]".red());
                             let stored_full = format!("0x{stored_address}");
-                            let stored_linked = wallet_link(&stored_full, "EVM");
-                            let derived_linked = wallet_link(&derived_address, "EVM");
+                            let stored_linked = wallet_link(&stored_full, chain_type);
+                            let derived_linked = wallet_link(&derived_address, chain_type);
                             println!("Stored:  {}", stored_linked.yellow());
                             println!("Derived: {}", derived_linked.yellow());
                             anyhow::bail!("Address derivation does not match stored address");
@@ -789,7 +835,7 @@ fn verify_evm_wallet(keystore: &Keystore, password: Option<String>) -> Result<()
                             "[WARN]".yellow()
                         );
                         let full_addr = format!("0x{stored_address}");
-                        let linked = wallet_link(&full_addr, "EVM");
+                        let linked = wallet_link(&full_addr, chain_type);
                         println!("Address: {}", linked.yellow());
                     }
                 }
@@ -843,12 +889,17 @@ pub fn use_command(name: &str) -> Result<()> {
 
     // Detect chain type
     let chain_type = if json["address"].is_string() {
-        "evm"
+        // Check for explicit Tempo marker
+        if json["chain"].as_str() == Some("tempo") {
+            "tempo"
+        } else {
+            "evm"
+        }
     } else if json["public_key"].is_string() || json["keypair"].is_string() {
         "solana"
     } else {
         anyhow::bail!(
-            "Cannot detect wallet type. Wallet must have 'address' (EVM) or 'public_key'/'keypair' (Solana) field."
+            "Cannot detect wallet type. Wallet must have 'address' (EVM/Tempo) or 'public_key'/'keypair' (Solana) field."
         );
     };
 
@@ -858,8 +909,9 @@ pub fn use_command(name: &str) -> Result<()> {
     let mut config = purl_lib::config::Config::load_or_default(None::<&str>)?;
 
     // Update the appropriate config section
+    // Note: Tempo wallets use EVM config since they're EVM-compatible
     match chain_type {
-        "evm" => {
+        "evm" | "tempo" => {
             let evm_config = config.evm.get_or_insert_with(Default::default);
             evm_config.keystore = Some(keystore_path.clone());
         }

@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use base64::Engine;
+use purl_lib::protocol::{CredentialPayload, PaymentProtocol};
 use purl_lib::x402::PaymentPayload;
 use purl_lib::{HttpClient, HttpClientBuilder, HttpMethod, HttpResponse};
 
@@ -71,15 +72,20 @@ impl RequestContext {
     pub async fn execute_with_payment(
         &self,
         url: &str,
+        protocol: &dyn PaymentProtocol,
         payment_payload: &PaymentPayload,
     ) -> Result<HttpResponse> {
         let payload_json = serde_json::to_string(payment_payload)
             .context("Failed to serialize payment payload")?;
-        let encoded_payload = base64::engine::general_purpose::STANDARD.encode(payload_json);
+        let encoded_payload = base64::engine::general_purpose::STANDARD.encode(&payload_json);
 
-        // Use version-appropriate header name
-        let header_name = payment_payload.payment_header_name();
-        let headers = vec![(header_name.to_string(), encoded_payload)];
+        // Use protocol to create the credential header
+        let credential = CredentialPayload {
+            data: encoded_payload,
+            version: payment_payload.x402_version,
+        };
+        let (header_name, header_value) = protocol.create_credential_header(&credential);
+        let headers = vec![(header_name, header_value)];
         self.execute(url, Some(&headers)).await
     }
 }

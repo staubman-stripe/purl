@@ -9,8 +9,7 @@ use crate::error::{PurlError, Result};
 use crate::http::{HttpClient, HttpClientBuilder, HttpMethod, HttpResponse};
 use crate::negotiator::PaymentNegotiator;
 use crate::payment_provider::PROVIDER_REGISTRY;
-use crate::protocol::{CredentialPayload, PROTOCOL_REGISTRY};
-use crate::x402::SettlementResponse;
+use crate::protocol::{CredentialPayload, SettlementResponse, PROTOCOL_REGISTRY};
 use base64::Engine;
 
 /// Builder for making payment-enabled HTTP requests.
@@ -209,17 +208,19 @@ impl PurlClient {
             .find_handler(&response)
             .ok_or_else(|| PurlError::Http("No compatible payment protocol found".to_string()))?;
 
-        // Parse the payment challenge using the detected protocol
-        let json = protocol.parse_challenge_json(&response)?;
+        // Parse the payment challenges using the detected protocol
+        let challenges = protocol.parse_challenges(&response)?;
+
         let negotiator = PaymentNegotiator::new(&self.config)
             .with_allowed_networks(&self.allowed_networks)
             .with_max_amount(self.max_amount.as_deref());
 
-        let selected = negotiator.select_requirement(&json)?;
+        // Select the best challenge using protocol-agnostic selection
+        let selected = negotiator.select_challenge(&challenges)?;
 
         if self.dry_run {
             if let Some(provider) = PROVIDER_REGISTRY.find_provider(selected.network()) {
-                let dry_run_info = provider.dry_run(&selected, &self.config)?;
+                let dry_run_info = provider.dry_run(selected, &self.config)?;
                 return Ok(PaymentResult::DryRun(dry_run_info));
             }
         }
@@ -228,7 +229,8 @@ impl PurlClient {
             .find_provider(selected.network())
             .ok_or_else(|| PurlError::ProviderNotFound(selected.network().to_string()))?;
 
-        let payment_payload = provider.create_payment(&selected, &self.config).await?;
+        // Create payment using the protocol-agnostic challenge
+        let payment_payload = provider.create_payment(selected, &self.config).await?;
 
         let payload_json = serde_json::to_string(&payment_payload)?;
         let encoded_payload = base64::engine::general_purpose::STANDARD.encode(&payload_json);
@@ -247,7 +249,14 @@ impl PurlClient {
         let settlement = if let Some(receipt_json) =
             protocol.parse_receipt_json(&response, credential.version)?
         {
-            let settlement: SettlementResponse = serde_json::from_str(&receipt_json)?;
+            let mut settlement: SettlementResponse = serde_json::from_str(&receipt_json)?;
+            // Inject network from the challenge into MPP settlements, since MPP
+            // receipts don't carry network info themselves
+            if let SettlementResponse::Mpp(ref mut mpp) = settlement {
+                if mpp.network.is_none() {
+                    mpp.network = Some(selected.network().to_string());
+                }
+            }
             Some(settlement)
         } else {
             None

@@ -3,6 +3,7 @@ use crate::currency::Currency;
 use crate::error::{PurlError, Result};
 use crate::network::{get_evm_chain_id, get_network, ChainType, Network};
 use crate::payment_provider::{DryRunInfo, NetworkBalance, PaymentProvider};
+use crate::protocol::PaymentChallenge;
 use crate::x402::{PaymentPayload, PaymentRequirements};
 use alloy::primitives::{Address, B256, U256};
 use alloy::providers::ProviderBuilder;
@@ -68,9 +69,17 @@ impl PaymentProvider for EvmProvider {
 
     async fn create_payment(
         &self,
-        requirements: &PaymentRequirements,
+        challenge: &dyn PaymentChallenge,
         config: &Config,
     ) -> Result<PaymentPayload> {
+        // Downcast to x402 PaymentRequirements
+        let requirements = challenge
+            .as_any()
+            .downcast_ref::<PaymentRequirements>()
+            .ok_or_else(|| {
+                PurlError::InvalidConfig("EVM provider expects x402 PaymentRequirements".to_string())
+            })?;
+
         let signer = Self::load_signer(config)?;
 
         let nonce_bytes = rand::random::<[u8; 32]>();
@@ -82,32 +91,32 @@ impl PaymentProvider for EvmProvider {
         // the official EVM client:
         // https://github.com/coinbase/x402/blob/c23d94eabec89de92b0229d7006d82097eec8b34/typescript/packages/mechanisms/evm/src/exact/client/scheme.ts#L40
         let valid_after = U256::from(now.saturating_sub(600));
-        let valid_before = U256::from(now + requirements.max_timeout_seconds());
+        let valid_before = U256::from(now + challenge.max_timeout_seconds());
 
-        let amount = requirements.parse_max_amount().map_err(|_| {
+        let amount: crate::x402::Amount = challenge.amount().parse().map_err(|_| {
             PurlError::InvalidAmount("The server provided an invalid payment amount.".to_string())
         })?;
         let value = U256::from(amount.as_atomic_units());
 
         let from = signer.address();
-        let to = Address::from_str(requirements.pay_to()).map_err(|_| {
+        let to = Address::from_str(challenge.recipient()).map_err(|_| {
             PurlError::invalid_address(
                 "The server provided an invalid recipient address.".to_string(),
             )
         })?;
 
-        let _ = crate::constants::get_token_decimals(requirements.network(), requirements.asset())?;
+        let _ = crate::constants::get_token_decimals(challenge.network(), challenge.asset())?;
 
         let (token_name, token_version) = requirements.evm_token_metadata().ok_or_else(|| {
             PurlError::MissingRequirement("token metadata (name and version)".to_string())
         })?;
 
-        let verifying_contract = Address::from_str(requirements.asset()).map_err(|_| {
+        let verifying_contract = Address::from_str(challenge.asset()).map_err(|_| {
             PurlError::invalid_address("The server provided an invalid token address.".to_string())
         })?;
 
-        let chain_id = get_evm_chain_id(requirements.network())
-            .ok_or_else(|| PurlError::UnknownNetwork(requirements.network().to_string()))?;
+        let chain_id = get_evm_chain_id(challenge.network())
+            .ok_or_else(|| PurlError::UnknownNetwork(challenge.network().to_string()))?;
 
         let authorization = TransferWithAuthorization {
             from,
@@ -146,8 +155,8 @@ impl PaymentProvider for EvmProvider {
         // Create version-appropriate payload based on requirements version
         let payment_payload = match requirements {
             PaymentRequirements::V1(_) => PaymentPayload::new_v1(
-                requirements.scheme().to_string(),
-                requirements.network().to_string(),
+                challenge.scheme().to_string(),
+                challenge.network().to_string(),
                 serde_json::to_value(evm_payload)?,
             ),
             PaymentRequirements::V2 {
@@ -168,18 +177,18 @@ impl PaymentProvider for EvmProvider {
         PROVIDER_NAME
     }
 
-    fn dry_run(&self, requirements: &PaymentRequirements, config: &Config) -> Result<DryRunInfo> {
-        let amount = requirements.parse_max_amount().map_err(|_| {
+    fn dry_run(&self, challenge: &dyn PaymentChallenge, config: &Config) -> Result<DryRunInfo> {
+        let amount: crate::x402::Amount = challenge.amount().parse().map_err(|_| {
             PurlError::InvalidAmount("The server provided an invalid payment amount.".to_string())
         })?;
 
         Ok(DryRunInfo {
             provider: PROVIDER_NAME.to_owned(),
-            network: requirements.network().to_string(),
+            network: challenge.network().to_string(),
             amount: amount.to_string(),
-            asset: requirements.asset().to_string(),
+            asset: challenge.asset().to_string(),
             from: config.evm_address()?,
-            to: requirements.pay_to().to_string(),
+            to: challenge.recipient().to_string(),
             estimated_fee: Some("0".to_string()), // EIP-3009 has no gas cost for sender
         })
     }

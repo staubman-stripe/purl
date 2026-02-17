@@ -7,7 +7,8 @@ use crate::config::Config;
 use crate::currency::Currency;
 use crate::error::Result;
 use crate::network::Network;
-use crate::x402::{PaymentPayload, PaymentRequirements};
+use crate::protocol::PaymentChallenge;
+use crate::x402::PaymentPayload;
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 
@@ -52,10 +53,13 @@ pub trait PaymentProvider: Send + Sync {
     /// Check if this provider supports the given network
     fn supports_network(&self, network: &str) -> bool;
 
-    /// Create a payment payload for the given requirements
+    /// Create a payment payload for the given challenge.
+    ///
+    /// The challenge is a protocol-agnostic trait object. Providers should downcast
+    /// to their expected concrete type (e.g., `MppChallenge` for Tempo, `PaymentRequirements` for x402).
     async fn create_payment(
         &self,
-        requirements: &PaymentRequirements,
+        challenge: &dyn PaymentChallenge,
         config: &Config,
     ) -> Result<PaymentPayload>;
 
@@ -63,7 +67,7 @@ pub trait PaymentProvider: Send + Sync {
     fn name(&self) -> &str;
 
     /// Check if a dry run shows this payment would succeed
-    fn dry_run(&self, requirements: &PaymentRequirements, config: &Config) -> Result<DryRunInfo>;
+    fn dry_run(&self, challenge: &dyn PaymentChallenge, config: &Config) -> Result<DryRunInfo>;
 
     /// Get the wallet address for this provider from config
     fn get_address(&self, config: &Config) -> Result<String>;
@@ -84,6 +88,7 @@ macro_rules! dispatch_provider {
             BuiltinProvider::Evm => Self::evm().$method($($arg),*),
             #[cfg(feature = "solana")]
             BuiltinProvider::Solana => Self::solana().$method($($arg),*),
+            BuiltinProvider::Tempo => Self::tempo().$method($($arg),*),
         }
     };
 }
@@ -100,6 +105,7 @@ pub enum BuiltinProvider {
     Evm,
     #[cfg(feature = "solana")]
     Solana,
+    Tempo,
 }
 
 impl Default for BuiltinProvider {
@@ -129,8 +135,20 @@ impl BuiltinProvider {
         &SOLANA
     }
 
+    /// Get the Tempo provider instance
+    fn tempo() -> &'static crate::providers::tempo::TempoProvider {
+        static TEMPO: crate::providers::tempo::TempoProvider =
+            crate::providers::tempo::TempoProvider;
+        &TEMPO
+    }
+
     /// Get the appropriate provider for a network
     pub fn for_network(network: &str) -> Option<Self> {
+        // Check Tempo first since it uses EVM-compatible addresses
+        // but has its own network type
+        if Self::tempo().supports_network(network) {
+            return Some(BuiltinProvider::Tempo);
+        }
         #[cfg(feature = "evm")]
         if Self::evm().supports_network(network) {
             return Some(BuiltinProvider::Evm);
@@ -149,6 +167,7 @@ impl BuiltinProvider {
             BuiltinProvider::Evm,
             #[cfg(feature = "solana")]
             BuiltinProvider::Solana,
+            BuiltinProvider::Tempo,
         ]
     }
 }
@@ -161,14 +180,15 @@ impl PaymentProvider for BuiltinProvider {
 
     async fn create_payment(
         &self,
-        requirements: &PaymentRequirements,
+        challenge: &dyn PaymentChallenge,
         config: &Config,
     ) -> Result<PaymentPayload> {
         match self {
             #[cfg(feature = "evm")]
-            BuiltinProvider::Evm => Self::evm().create_payment(requirements, config).await,
+            BuiltinProvider::Evm => Self::evm().create_payment(challenge, config).await,
             #[cfg(feature = "solana")]
-            BuiltinProvider::Solana => Self::solana().create_payment(requirements, config).await,
+            BuiltinProvider::Solana => Self::solana().create_payment(challenge, config).await,
+            BuiltinProvider::Tempo => Self::tempo().create_payment(challenge, config).await,
         }
     }
 
@@ -176,8 +196,8 @@ impl PaymentProvider for BuiltinProvider {
         dispatch_provider!(self, name())
     }
 
-    fn dry_run(&self, requirements: &PaymentRequirements, config: &Config) -> Result<DryRunInfo> {
-        dispatch_provider!(self, dry_run(requirements, config))
+    fn dry_run(&self, challenge: &dyn PaymentChallenge, config: &Config) -> Result<DryRunInfo> {
+        dispatch_provider!(self, dry_run(challenge, config))
     }
 
     fn get_address(&self, config: &Config) -> Result<String> {
@@ -195,6 +215,7 @@ impl PaymentProvider for BuiltinProvider {
             BuiltinProvider::Evm => Self::evm().get_balance(address, network, currency).await,
             #[cfg(feature = "solana")]
             BuiltinProvider::Solana => Self::solana().get_balance(address, network, currency).await,
+            BuiltinProvider::Tempo => Self::tempo().get_balance(address, network, currency).await,
         }
     }
 }
@@ -327,8 +348,56 @@ mod tests {
     fn test_builtin_provider_names() {
         let evm = BuiltinProvider::Evm;
         let solana = BuiltinProvider::Solana;
+        let tempo = BuiltinProvider::Tempo;
 
         assert_eq!(evm.name(), "EVM");
         assert_eq!(solana.name(), "Solana");
+        assert_eq!(tempo.name(), "Tempo");
+    }
+
+    #[test]
+    fn test_registry_finds_tempo_provider() {
+        let registry = &*PROVIDER_REGISTRY;
+
+        let provider = registry.find_provider("tempo-moderato");
+        assert!(provider.is_some());
+        assert_eq!(provider.unwrap().name(), "Tempo");
+    }
+
+    #[test]
+    fn test_registry_finds_tempo_via_alias() {
+        let registry = &*PROVIDER_REGISTRY;
+
+        let provider = registry.find_provider("eip155:42431");
+        assert!(provider.is_some());
+        assert_eq!(provider.unwrap().name(), "Tempo");
+    }
+
+    #[test]
+    fn test_builtin_provider_for_tempo_network() {
+        assert!(matches!(
+            BuiltinProvider::for_network("tempo-moderato"),
+            Some(BuiltinProvider::Tempo)
+        ));
+    }
+
+    #[test]
+    fn test_tempo_provider_does_not_support_evm_networks() {
+        let tempo = BuiltinProvider::Tempo;
+        assert!(!tempo.supports_network("base"));
+        assert!(!tempo.supports_network("ethereum"));
+        assert!(!tempo.supports_network("solana"));
+    }
+
+    #[test]
+    fn test_tempo_provider_supports_tempo_networks() {
+        let tempo = BuiltinProvider::Tempo;
+        assert!(tempo.supports_network("tempo-moderato"));
+    }
+
+    #[test]
+    fn test_all_providers_includes_tempo() {
+        let all = BuiltinProvider::all();
+        assert!(all.iter().any(|p| matches!(p, BuiltinProvider::Tempo)));
     }
 }

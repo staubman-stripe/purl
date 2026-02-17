@@ -12,6 +12,7 @@ pub mod currency;
 pub mod error;
 pub mod http;
 pub mod keystore;
+pub mod mpp;
 pub mod negotiator;
 pub mod network;
 pub mod payment_provider;
@@ -34,9 +35,10 @@ pub use config::{
 pub use currency::{currencies, Currency};
 pub use http::{HttpClient, HttpClientBuilder, HttpMethod, HttpResponse};
 pub use network::{networks, ChainType, Network, NetworkInfo};
-pub use x402::{PaymentPayload, PaymentRequirementsResponse, SettlementResponse};
+pub use x402::{PaymentPayload, PaymentRequirementsResponse};
 
 pub use payment_provider::{BuiltinProvider, NetworkBalance, PaymentProvider, PROVIDER_REGISTRY};
 pub use protocol::{
-    PaymentChallenge, PaymentProtocol, PaymentReceipt, ProtocolRegistry, PROTOCOL_REGISTRY,
+    PaymentChallenge, PaymentProtocol, PaymentReceipt, ProtocolRegistry, SettlementResponse,
+    PROTOCOL_REGISTRY,
 };

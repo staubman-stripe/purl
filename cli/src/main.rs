@@ -25,7 +25,7 @@ use cli::{
 };
 use colored::control;
 use exit_codes::ExitCode;
-use purl_lib::{Config, PaymentRequirementsResponse, WalletConfig};
+use purl_lib::{Config, WalletConfig, PROTOCOL_REGISTRY};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -200,11 +200,31 @@ async fn make_request(cli: Cli) -> Result<()> {
         eprintln!("402 status: payment required");
     }
 
-    let json = response.payment_requirements_json()?;
-    let requirements: PaymentRequirementsResponse =
-        serde_json::from_str(&json).context("Failed to parse payment requirements")?;
+    // Use protocol registry to detect and parse payment challenges from all matching protocols
+    let handlers = PROTOCOL_REGISTRY.find_all_handlers(&response);
+    if handlers.is_empty() {
+        anyhow::bail!("No compatible payment protocol found for this 402 response");
+    }
 
-    let response = handle_payment_request(&config, &request_ctx, url, requirements).await?;
+    let mut challenges: Vec<Box<dyn purl_lib::protocol::PaymentChallenge>> = Vec::new();
+    for handler in &handlers {
+        if request_ctx.cli.is_verbose() && request_ctx.cli.should_show_output() {
+            eprintln!("Detected protocol: {}", handler.name());
+        }
+        match handler.parse_challenges(&response) {
+            Ok(parsed) => challenges.extend(parsed),
+            Err(e) => {
+                if request_ctx.cli.is_verbose() && request_ctx.cli.should_show_output() {
+                    eprintln!("Warning: failed to parse {} challenges: {}", handler.name(), e);
+                }
+            }
+        }
+    }
+    if challenges.is_empty() {
+        anyhow::bail!("Failed to parse payment challenges from any protocol");
+    }
+
+    let response = handle_payment_request(&config, &request_ctx, url, challenges).await?;
 
     // If still 402 after payment attempt, check for specific error codes
     if response.is_payment_required() {

@@ -139,6 +139,7 @@ fn test_payment_method_as_str() {
     let test_cases = vec![
         (PaymentMethod::Evm, "evm"),
         (PaymentMethod::Solana, "solana"),
+        (PaymentMethod::Tempo, "tempo"),
     ];
 
     for (method, expected_str) in test_cases {

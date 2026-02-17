@@ -99,6 +99,9 @@ pub mod currencies {
 
     /// Solana (SOL) - 9 decimals
     pub const SOL: Currency = Currency::new("SOL", "Solana", 9);
+
+    /// PathUSD (pathUSD) - Tempo testnet stablecoin - 6 decimals
+    pub const PATHUSD: Currency = Currency::new("pathUSD", "PathUSD", 6);
 }
 
 #[cfg(test)]

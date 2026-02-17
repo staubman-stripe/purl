@@ -62,11 +62,12 @@ pub fn address_link(address: &str, network: &str) -> String {
 
 /// Format a wallet address as a clickable hyperlink using a default network for the chain type.
 ///
-/// Uses Base for EVM wallets and Solana mainnet for Solana wallets.
+/// Uses Base for EVM wallets, Solana mainnet for Solana wallets, and Tempo Moderato for Tempo wallets.
 pub fn wallet_link(address: &str, chain: &str) -> String {
     let network = match chain {
-        "EVM" => "base",
-        "Solana" => "solana",
+        "EVM" | "evm" => "base",
+        "Solana" | "solana" => "solana",
+        "Tempo" | "tempo" => "tempo",
         _ => return address.to_string(),
     };
     address_link(address, network)
@@ -181,5 +182,50 @@ mod tests {
     fn test_wallet_link_unknown_chain() {
         let link = wallet_link("0x123", "Unknown");
         assert_eq!(link, "0x123");
+    }
+
+    #[test]
+    fn test_wallet_link_tempo_plain_text_when_not_tty() {
+        let link = wallet_link("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca", "Tempo");
+        assert_eq!(link, "0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca");
+    }
+
+    #[test]
+    fn test_wallet_link_tempo_uses_tempo_url_lookup() {
+        let url = purl_lib::network::get_network("tempo")
+            .and_then(|n| n.address_url("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"))
+            .expect("tempo address url");
+        assert!(url.contains("explore.tempo.xyz"));
+        assert!(url.contains("/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"));
+    }
+
+    #[test]
+    fn test_tempo_address_link_plain_text_when_not_tty() {
+        let link = address_link("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca", "tempo");
+        assert_eq!(link, "0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca");
+    }
+
+    #[test]
+    fn test_tempo_address_url_lookup() {
+        let url = purl_lib::network::get_network("tempo")
+            .and_then(|n| n.address_url("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"))
+            .expect("tempo address url");
+        assert!(url.contains("explore.tempo.xyz"));
+        assert!(url.contains("/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"));
+    }
+
+    #[test]
+    fn test_tempo_tx_link_plain_text_when_not_tty() {
+        let link = tx_link("0x123abc", "tempo");
+        assert_eq!(link, "0x123abc");
+    }
+
+    #[test]
+    fn test_tempo_tx_url_lookup() {
+        let url = purl_lib::network::get_network("tempo")
+            .and_then(|n| n.tx_url("0x123abc"))
+            .expect("tempo tx url");
+        assert!(url.contains("explore.tempo.xyz"));
+        assert!(url.contains("/tx/0x123abc"));
     }
 }

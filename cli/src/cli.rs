@@ -389,6 +389,8 @@ pub enum WalletType {
     Evm,
     /// Solana wallet
     Solana,
+    /// Tempo wallet (EVM-compatible, uses explore.tempo.xyz)
+    Tempo,
 }
 
 #[derive(Subcommand, Debug)]
