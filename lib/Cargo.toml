@@ -37,7 +37,6 @@ solana = [
 ]
 
 [dependencies]
-# Core dependencies (always required)
 mpp.workspace = true
 reqwest.workspace = true
 serde.workspace = true
