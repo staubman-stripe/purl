@@ -91,7 +91,8 @@ impl<'a> PaymentNegotiator<'a> {
                     .find(|c| self.is_challenge_compatible(c.as_ref(), &available_methods))
             })
             .ok_or_else(|| {
-                let networks: Vec<String> = challenges.iter().map(|c| c.network().to_string()).collect();
+                let networks: Vec<String> =
+                    challenges.iter().map(|c| c.network().to_string()).collect();
                 PurlError::NoCompatibleMethod { networks }
             })?;
 
@@ -109,7 +110,10 @@ impl<'a> PaymentNegotiator<'a> {
     ) -> bool {
         // Check network filter
         if !self.allowed_networks.is_empty()
-            && !self.allowed_networks.iter().any(|n| n == challenge.network())
+            && !self
+                .allowed_networks
+                .iter()
+                .any(|n| n == challenge.network())
         {
             return false;
         }
@@ -143,7 +147,10 @@ impl<'a> PaymentNegotiator<'a> {
     ) -> bool {
         // Must pass the same network/token filters as compatibility check
         if !self.allowed_networks.is_empty()
-            && !self.allowed_networks.iter().any(|n| n == challenge.network())
+            && !self
+                .allowed_networks
+                .iter()
+                .any(|n| n == challenge.network())
         {
             return false;
         }
@@ -157,7 +164,9 @@ impl<'a> PaymentNegotiator<'a> {
         // Only direct wallet matches — no EVM-as-Tempo fallback.
         // Tempo challenges report is_evm() == true (EVM-compatible addresses),
         // so we must exclude them from the EVM direct-match path.
-        (challenge.is_evm() && !challenge.is_tempo() && available_methods.contains(&PaymentMethod::Evm))
+        (challenge.is_evm()
+            && !challenge.is_tempo()
+            && available_methods.contains(&PaymentMethod::Evm))
             || (challenge.is_solana() && available_methods.contains(&PaymentMethod::Solana))
             || (challenge.is_tempo() && available_methods.contains(&PaymentMethod::Tempo))
     }
@@ -165,12 +174,13 @@ impl<'a> PaymentNegotiator<'a> {
     /// Validate amount constraints for a challenge.
     fn validate_challenge_constraints(&self, challenge: &dyn PaymentChallenge) -> Result<()> {
         if let Some(max) = self.max_amount {
-            let required: Amount = challenge.amount().parse().map_err(|e| {
-                PurlError::InvalidAmount(format!("required amount: {e}"))
-            })?;
-            let max_val: Amount = max.parse().map_err(|e| {
-                PurlError::InvalidAmount(format!("max amount: {e}"))
-            })?;
+            let required: Amount = challenge
+                .amount()
+                .parse()
+                .map_err(|e| PurlError::InvalidAmount(format!("required amount: {e}")))?;
+            let max_val: Amount = max
+                .parse()
+                .map_err(|e| PurlError::InvalidAmount(format!("max amount: {e}")))?;
 
             if required > max_val {
                 return Err(PurlError::AmountExceedsMax {
@@ -578,13 +588,15 @@ mod tests {
         );
         let mpp_challenge = MppChallenge::from_mpp_challenge(inner).unwrap();
 
-        let challenges: Vec<Box<dyn PaymentChallenge>> =
-            vec![Box::new(mpp_challenge)];
+        let challenges: Vec<Box<dyn PaymentChallenge>> = vec![Box::new(mpp_challenge)];
 
         let negotiator = PaymentNegotiator::new(&config);
         let result = negotiator.select_challenge(&challenges);
 
-        assert!(result.is_ok(), "Tempo challenge should be selected with EVM config: {result:?}");
+        assert!(
+            result.is_ok(),
+            "Tempo challenge should be selected with EVM config: {result:?}"
+        );
         let selected = result.unwrap();
         assert!(selected.is_tempo());
         assert_eq!(selected.scheme(), "mpp");
@@ -613,8 +625,7 @@ mod tests {
         );
         let mpp_challenge = MppChallenge::from_mpp_challenge(inner).unwrap();
 
-        let challenges: Vec<Box<dyn PaymentChallenge>> =
-            vec![Box::new(mpp_challenge)];
+        let challenges: Vec<Box<dyn PaymentChallenge>> = vec![Box::new(mpp_challenge)];
 
         let negotiator = PaymentNegotiator::new(&config).with_max_amount(Some("1000"));
         let result = negotiator.select_challenge(&challenges);
@@ -645,12 +656,11 @@ mod tests {
         );
         let mpp_challenge = MppChallenge::from_mpp_challenge(inner).unwrap();
 
-        let challenges: Vec<Box<dyn PaymentChallenge>> =
-            vec![Box::new(mpp_challenge)];
+        let challenges: Vec<Box<dyn PaymentChallenge>> = vec![Box::new(mpp_challenge)];
 
         // Filter to only allow base-sepolia - should reject tempo
-        let negotiator = PaymentNegotiator::new(&config)
-            .with_allowed_networks(&["base-sepolia".to_string()]);
+        let negotiator =
+            PaymentNegotiator::new(&config).with_allowed_networks(&["base-sepolia".to_string()]);
         let result = negotiator.select_challenge(&challenges);
 
         assert!(result.is_err());
@@ -734,8 +744,7 @@ mod tests {
         );
         let mpp_challenge = MppChallenge::from_mpp_challenge(inner).unwrap();
 
-        let challenges: Vec<Box<dyn PaymentChallenge>> =
-            vec![Box::new(mpp_challenge)];
+        let challenges: Vec<Box<dyn PaymentChallenge>> = vec![Box::new(mpp_challenge)];
 
         let negotiator = PaymentNegotiator::new(&config);
         let result = negotiator.select_challenge(&challenges);
@@ -774,8 +783,7 @@ mod tests {
         );
         let mpp_challenge = MppChallenge::from_mpp_challenge(inner).unwrap();
 
-        let challenges: Vec<Box<dyn PaymentChallenge>> =
-            vec![Box::new(mpp_challenge)];
+        let challenges: Vec<Box<dyn PaymentChallenge>> = vec![Box::new(mpp_challenge)];
 
         let negotiator = PaymentNegotiator::new(&config);
         let result = negotiator.select_challenge(&challenges);

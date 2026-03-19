@@ -381,12 +381,17 @@ fn test_tempo_has_explorer_url() {
 
     let addr_url = info.address_url("0x1234");
     assert!(addr_url.is_some());
-    assert!(addr_url.unwrap().contains("explore.tempo.xyz/address/0x1234"));
+    assert!(addr_url
+        .unwrap()
+        .contains("explore.tempo.xyz/address/0x1234"));
 
     // Testnet (shared explorer)
     let info = get_network("tempo-moderato").unwrap();
     assert!(info.explorer_url.is_some());
-    assert!(info.tx_url("0xabc123").unwrap().contains("explore.tempo.xyz/tx/0xabc123"));
+    assert!(info
+        .tx_url("0xabc123")
+        .unwrap()
+        .contains("explore.tempo.xyz/tx/0xabc123"));
 }
 
 #[test]
@@ -419,10 +424,7 @@ fn test_tempo_default_token_config() {
 #[test]
 fn test_tempo_token_decimals() {
     // USDC on Tempo mainnet
-    let decimals = get_token_decimals(
-        "tempo",
-        "0x20c000000000000000000000b9537d11c60e8b50",
-    );
+    let decimals = get_token_decimals("tempo", "0x20c000000000000000000000b9537d11c60e8b50");
     assert!(decimals.is_ok());
     assert_eq!(decimals.unwrap(), 6);
 
@@ -446,10 +448,7 @@ fn test_tempo_token_decimals() {
 #[test]
 fn test_tempo_token_symbols() {
     // Tempo mainnet USDC
-    let symbol = get_token_symbol(
-        "tempo",
-        "0x20c000000000000000000000b9537d11c60e8b50",
-    );
+    let symbol = get_token_symbol("tempo", "0x20c000000000000000000000b9537d11c60e8b50");
     assert_eq!(symbol, Some("USDC"));
 
     // Tempo Moderato pathUSD

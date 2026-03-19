@@ -32,9 +32,7 @@ impl TempoProvider {
     }
 
     /// Load EVM signer from config (reused for Tempo since it uses EVM addresses)
-    fn load_signer(
-        config: &Config,
-    ) -> Result<alloy_signer_local::PrivateKeySigner> {
+    fn load_signer(config: &Config) -> Result<alloy_signer_local::PrivateKeySigner> {
         use crate::signer::WalletSource;
         let evm_config = config.require_evm()?;
         evm_config.load_signer(config.password.as_deref())
@@ -62,29 +60,29 @@ impl PaymentProvider for TempoProvider {
             .unwrap_or_else(|| "https://rpc.tempo.xyz".to_string());
 
         // Create mpp-rs TempoProvider
-        let mpp_provider = mpp::client::TempoProvider::new(signer.clone(), &rpc_url)
-            .map_err(|e| PurlError::InvalidConfig(format!("Failed to create Tempo provider: {}", e)))?;
+        let mpp_provider =
+            mpp::client::TempoProvider::new(signer.clone(), &rpc_url).map_err(|e| {
+                PurlError::InvalidConfig(format!("Failed to create Tempo provider: {}", e))
+            })?;
 
         // Require native MPP challenge - no protocol conversion
         let mpp_challenge = challenge
             .as_any()
             .downcast_ref::<MppChallenge>()
             .ok_or_else(|| {
-                PurlError::InvalidConfig(
-                    "Tempo provider requires an MppChallenge".to_string(),
-                )
+                PurlError::InvalidConfig("Tempo provider requires an MppChallenge".to_string())
             })?;
 
         // Execute payment using native MPP challenge
         use mpp::client::PaymentProvider as MppPaymentProvider;
-        let credential = mpp_provider.pay(&mpp_challenge.inner).await.map_err(|e| {
-            PurlError::Signing(format!("Tempo payment failed: {}", e))
-        })?;
+        let credential = mpp_provider
+            .pay(&mpp_challenge.inner)
+            .await
+            .map_err(|e| PurlError::Signing(format!("Tempo payment failed: {}", e)))?;
 
         // Format as Authorization header value
-        let auth_header = mpp::format_authorization(&credential).map_err(|e| {
-            PurlError::Signing(format!("Failed to format credential: {}", e))
-        })?;
+        let auth_header = mpp::format_authorization(&credential)
+            .map_err(|e| PurlError::Signing(format!("Failed to format credential: {}", e)))?;
 
         // Create a purl PaymentPayload that carries the MPP credential
         // We store the full Authorization header value so it can be used directly
@@ -161,9 +159,8 @@ impl PaymentProvider for TempoProvider {
                 ))
             })?);
 
-        let wallet_address = Address::from_str(address).map_err(|_| {
-            PurlError::invalid_address(format!("Invalid address: {}", address))
-        })?;
+        let wallet_address = Address::from_str(address)
+            .map_err(|_| PurlError::invalid_address(format!("Invalid address: {}", address)))?;
         let token_address = Address::from_str(token_config.address).map_err(|_| {
             PurlError::invalid_address(format!(
                 "Invalid {} token configuration for {}. This is an internal error.",
@@ -173,12 +170,16 @@ impl PaymentProvider for TempoProvider {
 
         let contract = IERC20::new(token_address, &provider);
 
-        let balance = contract.balanceOf(wallet_address).call().await.map_err(|e| {
-            PurlError::BalanceQuery(format!(
-                "Could not fetch balance from {}. The network may be unavailable: {}",
-                network, e
-            ))
-        })?;
+        let balance = contract
+            .balanceOf(wallet_address)
+            .call()
+            .await
+            .map_err(|e| {
+                PurlError::BalanceQuery(format!(
+                    "Could not fetch balance from {}. The network may be unavailable: {}",
+                    network, e
+                ))
+            })?;
 
         let balance_atomic: u128 = balance.to_string().parse().unwrap_or(0);
         let balance_human = token_config.currency.format_atomic(balance_atomic);

@@ -774,7 +774,11 @@ fn verify_solana_wallet(
 }
 
 /// Verify an EVM/Tempo wallet
-fn verify_evm_wallet(keystore: &Keystore, chain_type: &str, password: Option<String>) -> Result<()> {
+fn verify_evm_wallet(
+    keystore: &Keystore,
+    chain_type: &str,
+    password: Option<String>,
+) -> Result<()> {
     match keystore.validate() {
         Ok(()) => {
             println!("{} Wallet format is valid", "[OK]".green());

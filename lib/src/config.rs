@@ -441,13 +441,21 @@ impl Config {
             methods.push(PaymentMethod::Evm);
         } else if let Some(evm) = &self.evm {
             // Check if this is a Tempo wallet by reading the keystore
-            let is_tempo = evm.keystore.as_ref().and_then(|path| {
-                std::fs::read_to_string(path).ok().and_then(|content| {
-                    serde_json::from_str::<serde_json::Value>(&content)
-                        .ok()
-                        .and_then(|json| json.get("chain").and_then(|c| c.as_str()).map(|c| c == "tempo"))
+            let is_tempo = evm
+                .keystore
+                .as_ref()
+                .and_then(|path| {
+                    std::fs::read_to_string(path).ok().and_then(|content| {
+                        serde_json::from_str::<serde_json::Value>(&content)
+                            .ok()
+                            .and_then(|json| {
+                                json.get("chain")
+                                    .and_then(|c| c.as_str())
+                                    .map(|c| c == "tempo")
+                            })
+                    })
                 })
-            }).unwrap_or(false);
+                .unwrap_or(false);
 
             if is_tempo {
                 methods.push(PaymentMethod::Tempo);

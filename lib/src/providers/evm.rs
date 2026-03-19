@@ -77,7 +77,9 @@ impl PaymentProvider for EvmProvider {
             .as_any()
             .downcast_ref::<PaymentRequirements>()
             .ok_or_else(|| {
-                PurlError::InvalidConfig("EVM provider expects x402 PaymentRequirements".to_string())
+                PurlError::InvalidConfig(
+                    "EVM provider expects x402 PaymentRequirements".to_string(),
+                )
             })?;
 
         let signer = Self::load_signer(config)?;

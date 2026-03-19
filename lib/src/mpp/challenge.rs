@@ -51,9 +51,10 @@ impl MppChallenge {
         use crate::error::PurlError;
 
         // Decode the request field to get payment details
-        let request: serde_json::Value = challenge.request.decode_value().map_err(|e| {
-            PurlError::Http(format!("Failed to decode MPP request: {}", e))
-        })?;
+        let request: serde_json::Value = challenge
+            .request
+            .decode_value()
+            .map_err(|e| PurlError::Http(format!("Failed to decode MPP request: {}", e)))?;
 
         // Extract fields from the request
         let amount = request
@@ -166,10 +167,7 @@ impl PaymentChallenge for MppChallenge {
 mod tests {
     use super::*;
 
-    fn make_challenge(
-        method: &str,
-        request_json: serde_json::Value,
-    ) -> MppChallenge {
+    fn make_challenge(method: &str, request_json: serde_json::Value) -> MppChallenge {
         use mpp::protocol::core::Base64UrlJson;
         let request = Base64UrlJson::from_value(&request_json).unwrap();
         let inner = mpp::PaymentChallenge::new(
@@ -184,11 +182,14 @@ mod tests {
 
     #[test]
     fn test_mpp_challenge_is_tempo() {
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "1000",
-            "currency": "USDC",
-            "recipient": "0x1234",
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000",
+                "currency": "USDC",
+                "recipient": "0x1234",
+            }),
+        );
 
         assert!(challenge.is_tempo());
         assert!(challenge.is_evm());
@@ -200,15 +201,21 @@ mod tests {
 
     #[test]
     fn test_mpp_challenge_fields() {
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "5000000",
-            "currency": "pathUSD",
-            "recipient": "0xabcdef1234567890abcdef1234567890abcdef12",
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "5000000",
+                "currency": "pathUSD",
+                "recipient": "0xabcdef1234567890abcdef1234567890abcdef12",
+            }),
+        );
 
         assert_eq!(challenge.amount(), "5000000");
         assert_eq!(challenge.asset(), "pathUSD");
-        assert_eq!(challenge.recipient(), "0xabcdef1234567890abcdef1234567890abcdef12");
+        assert_eq!(
+            challenge.recipient(),
+            "0xabcdef1234567890abcdef1234567890abcdef12"
+        );
         assert_eq!(challenge.resource(), "https://example.com/api");
         assert_eq!(challenge.mime_type(), "application/json");
         assert_eq!(challenge.max_timeout_seconds(), 300);
@@ -218,31 +225,40 @@ mod tests {
     #[test]
     fn test_mpp_challenge_network_from_chain_id() {
         // With explicit chainId for mainnet
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "1000",
-            "currency": "USDC",
-            "recipient": "0x1234",
-            "methodDetails": { "chainId": 4217 },
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000",
+                "currency": "USDC",
+                "recipient": "0x1234",
+                "methodDetails": { "chainId": 4217 },
+            }),
+        );
         assert_eq!(challenge.network(), "eip155:4217");
         assert!(challenge.is_tempo());
 
         // With explicit chainId for testnet
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "1000",
-            "currency": "USDC",
-            "recipient": "0x1234",
-            "methodDetails": { "chainId": 42431 },
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000",
+                "currency": "USDC",
+                "recipient": "0x1234",
+                "methodDetails": { "chainId": 42431 },
+            }),
+        );
         assert_eq!(challenge.network(), "eip155:42431");
         assert!(challenge.is_tempo());
 
         // Without methodDetails - defaults to 42431 for backward compat
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "1000",
-            "currency": "USDC",
-            "recipient": "0x1234",
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000",
+                "currency": "USDC",
+                "recipient": "0x1234",
+            }),
+        );
         assert_eq!(challenge.network(), "eip155:42431");
     }
 
@@ -260,12 +276,15 @@ mod tests {
     #[test]
     fn test_mpp_challenge_non_tempo_method() {
         // A non-tempo method should still produce an eip155 network
-        let challenge = make_challenge("other-method", serde_json::json!({
-            "amount": "100",
-            "currency": "USDC",
-            "recipient": "0x1234",
-            "methodDetails": { "chainId": 1 },
-        }));
+        let challenge = make_challenge(
+            "other-method",
+            serde_json::json!({
+                "amount": "100",
+                "currency": "USDC",
+                "recipient": "0x1234",
+                "methodDetails": { "chainId": 1 },
+            }),
+        );
 
         assert_eq!(challenge.network(), "eip155:1");
         // is_tempo checks both network and method
@@ -275,11 +294,14 @@ mod tests {
 
     #[test]
     fn test_mpp_challenge_as_any_downcast() {
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "1000",
-            "currency": "USDC",
-            "recipient": "0x1234",
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000",
+                "currency": "USDC",
+                "recipient": "0x1234",
+            }),
+        );
 
         // Should be able to downcast from trait object
         let trait_obj: &dyn PaymentChallenge = &challenge;
@@ -290,11 +312,14 @@ mod tests {
 
     #[test]
     fn test_mpp_challenge_debug_format() {
-        let challenge = make_challenge("tempo", serde_json::json!({
-            "amount": "1000",
-            "currency": "USDC",
-            "recipient": "0x1234",
-        }));
+        let challenge = make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000",
+                "currency": "USDC",
+                "recipient": "0x1234",
+            }),
+        );
 
         let debug = format!("{:?}", challenge);
         assert!(debug.contains("MppChallenge"));

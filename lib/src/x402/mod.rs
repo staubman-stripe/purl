@@ -203,9 +203,7 @@ impl PaymentRequirements {
         use crate::network::is_tempo_network;
         match self {
             PaymentRequirements::V1(v1) => is_tempo_network(&v1.network),
-            PaymentRequirements::V2 { requirements, .. } => {
-                is_tempo_network(&requirements.network)
-            }
+            PaymentRequirements::V2 { requirements, .. } => is_tempo_network(&requirements.network),
         }
     }
 

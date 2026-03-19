@@ -4,7 +4,9 @@ use anyhow::{Context, Result};
 use dialoguer::Confirm;
 use purl_lib::protocol::{PaymentChallenge, PaymentProtocol};
 use purl_lib::x402::PaymentPayload;
-use purl_lib::{Config, HttpResponse, SettlementResponse, WalletConfig, PROTOCOL_REGISTRY, PROVIDER_REGISTRY};
+use purl_lib::{
+    Config, HttpResponse, SettlementResponse, WalletConfig, PROTOCOL_REGISTRY, PROVIDER_REGISTRY,
+};
 
 use crate::cli::Cli;
 use crate::exit_codes::ExitCode;
@@ -100,7 +102,10 @@ pub async fn handle_payment_request(
                     version: 1,
                 };
                 let (header_name, header_value) = protocol.create_credential_header(&credential);
-                eprintln!("{header_name} header: {}", truncate_for_display(&header_value, 80));
+                eprintln!(
+                    "{header_name} header: {}",
+                    truncate_for_display(&header_value, 80)
+                );
             }
         } else {
             // For x402, show the decoded payload
@@ -186,8 +191,11 @@ fn handle_dry_run(config: &Config, challenge: &dyn PaymentChallenge) -> Result<H
         let to_display = address_link(&dry_run_info.to, &dry_run_info.network);
 
         // Try to get human-readable asset symbol
-        let (amount_display, asset_display) =
-            format_dry_run_amount(&dry_run_info.network, &dry_run_info.asset, &dry_run_info.amount);
+        let (amount_display, asset_display) = format_dry_run_amount(
+            &dry_run_info.network,
+            &dry_run_info.asset,
+            &dry_run_info.amount,
+        );
 
         println!("[DRY RUN] Payment would be made:");
         println!("Provider: {}", dry_run_info.provider);

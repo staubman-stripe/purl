@@ -106,7 +106,9 @@ impl PaymentProvider for SolanaProvider {
             .as_any()
             .downcast_ref::<PaymentRequirements>()
             .ok_or_else(|| {
-                PurlError::InvalidConfig("Solana provider expects x402 PaymentRequirements".to_string())
+                PurlError::InvalidConfig(
+                    "Solana provider expects x402 PaymentRequirements".to_string(),
+                )
             })?;
 
         let keypair = Self::load_keypair(config)?;
@@ -248,13 +250,14 @@ impl PaymentProvider for SolanaProvider {
 
     fn dry_run(&self, challenge: &dyn PaymentChallenge, config: &Config) -> Result<DryRunInfo> {
         // Downcast to get Solana-specific fields
-        let requirements = challenge
-            .as_any()
-            .downcast_ref::<PaymentRequirements>();
+        let requirements = challenge.as_any().downcast_ref::<PaymentRequirements>();
 
         let solana_config = config.require_solana()?;
 
-        let token_program = if requirements.map(|r| r.solana_token_program().is_some()).unwrap_or(false) {
+        let token_program = if requirements
+            .map(|r| r.solana_token_program().is_some())
+            .unwrap_or(false)
+        {
             SPL_TOKEN_2022_NAME
         } else {
             SPL_TOKEN_NAME

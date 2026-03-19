@@ -84,10 +84,7 @@ impl ProtocolRegistry {
 
     /// List all registered protocol names
     pub fn protocol_names(&self) -> Vec<&str> {
-        self.protocols_ordered
-            .iter()
-            .map(|p| p.name())
-            .collect()
+        self.protocols_ordered.iter().map(|p| p.name()).collect()
     }
 }
 
@@ -180,7 +177,10 @@ mod tests {
 
         let protocol = registry.find_handler(&response);
         assert!(protocol.is_some());
-        assert_eq!(protocol.unwrap().name(), crate::mpp::protocol::PROTOCOL_NAME);
+        assert_eq!(
+            protocol.unwrap().name(),
+            crate::mpp::protocol::PROTOCOL_NAME
+        );
     }
 
     #[test]
@@ -194,7 +194,10 @@ mod tests {
 
         let protocol = registry.find_handler(&response);
         assert!(protocol.is_some());
-        assert_eq!(protocol.unwrap().name(), crate::mpp::protocol::PROTOCOL_NAME);
+        assert_eq!(
+            protocol.unwrap().name(),
+            crate::mpp::protocol::PROTOCOL_NAME
+        );
     }
 
     #[test]

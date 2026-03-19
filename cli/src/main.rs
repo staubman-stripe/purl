@@ -215,7 +215,11 @@ async fn make_request(cli: Cli) -> Result<()> {
             Ok(parsed) => challenges.extend(parsed),
             Err(e) => {
                 if request_ctx.cli.is_verbose() && request_ctx.cli.should_show_output() {
-                    eprintln!("Warning: failed to parse {} challenges: {}", handler.name(), e);
+                    eprintln!(
+                        "Warning: failed to parse {} challenges: {}",
+                        handler.name(),
+                        e
+                    );
                 }
             }
         }

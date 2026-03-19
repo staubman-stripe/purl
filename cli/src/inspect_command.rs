@@ -146,7 +146,11 @@ pub async fn inspect_command(cli: &Cli, url: &str) -> Result<()> {
             Ok(parsed) => challenges.extend(parsed),
             Err(e) => {
                 if cli.is_verbose() && cli.should_show_output() {
-                    eprintln!("Warning: failed to parse {} challenges: {}", handler.name(), e);
+                    eprintln!(
+                        "Warning: failed to parse {} challenges: {}",
+                        handler.name(),
+                        e
+                    );
                 }
             }
         }
@@ -169,9 +173,15 @@ pub async fn inspect_command(cli: &Cli, url: &str) -> Result<()> {
 
         match format {
             OutputFormat::Auto => unreachable!("Auto should be resolved"),
-            OutputFormat::Json => output_mpp_json(cli, &protocol_names, &challenges, &available_methods)?,
-            OutputFormat::Yaml => output_mpp_yaml(cli, &protocol_names, &challenges, &available_methods)?,
-            OutputFormat::Text => output_mpp_text(cli, &protocol_names, &challenges, &available_methods)?,
+            OutputFormat::Json => {
+                output_mpp_json(cli, &protocol_names, &challenges, &available_methods)?
+            }
+            OutputFormat::Yaml => {
+                output_mpp_yaml(cli, &protocol_names, &challenges, &available_methods)?
+            }
+            OutputFormat::Text => {
+                output_mpp_text(cli, &protocol_names, &challenges, &available_methods)?
+            }
         }
     }
 
@@ -467,8 +477,8 @@ fn build_mpp_output(
             // Get MPP-specific fields if available
             let (challenge_id, method) = if let Some(mpp_challenge) = challenge
                 .as_any()
-                .downcast_ref::<purl_lib::mpp::MppChallenge>()
-            {
+                .downcast_ref::<purl_lib::mpp::MppChallenge>(
+            ) {
                 (
                     Some(mpp_challenge.inner.id.clone()),
                     Some(mpp_challenge.inner.method.as_str().to_string()),
@@ -619,7 +629,11 @@ fn output_mpp_text(
 
     // Colored output for terminal
     println!("{}", "Payment Required (402)".yellow().bold());
-    println!("{}: {}", "Protocols".bold(), data.protocols.join(", ").cyan());
+    println!(
+        "{}: {}",
+        "Protocols".bold(),
+        data.protocols.join(", ").cyan()
+    );
     println!(
         "{}: {}",
         "Payment Options".bold(),
@@ -630,7 +644,11 @@ fn output_mpp_text(
 
     for (i, opt) in data.challenges.iter().enumerate() {
         println!();
-        println!("  {} {}", format!("Option {}:", i + 1).cyan().bold(), opt.network.cyan());
+        println!(
+            "  {} {}",
+            format!("Option {}:", i + 1).cyan().bold(),
+            opt.network.cyan()
+        );
         println!("    {}: {}", "Protocol".dimmed(), opt.protocol);
         println!("    {}: {}", "Scheme".dimmed(), opt.scheme);
 

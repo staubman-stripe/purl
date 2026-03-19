@@ -53,9 +53,8 @@ impl PaymentProtocol for MppProtocol {
             .ok_or_else(|| PurlError::Http("Missing WWW-Authenticate header".to_string()))?;
 
         // Parse the challenge using mpp-rs
-        let challenge = mpp::parse_www_authenticate(header).map_err(|e| {
-            PurlError::Http(format!("Failed to parse MPP challenge: {}", e))
-        })?;
+        let challenge = mpp::parse_www_authenticate(header)
+            .map_err(|e| PurlError::Http(format!("Failed to parse MPP challenge: {}", e)))?;
 
         // Wrap in MppChallenge to preserve native challenge
         let mpp_challenge = MppChallenge::from_mpp_challenge(challenge)?;
@@ -70,9 +69,8 @@ impl PaymentProtocol for MppProtocol {
             .ok_or_else(|| PurlError::Http("Missing WWW-Authenticate header".to_string()))?;
 
         // Parse the challenge using mpp-rs
-        let challenge = mpp::parse_www_authenticate(header).map_err(|e| {
-            PurlError::Http(format!("Failed to parse MPP challenge: {}", e))
-        })?;
+        let challenge = mpp::parse_www_authenticate(header)
+            .map_err(|e| PurlError::Http(format!("Failed to parse MPP challenge: {}", e)))?;
 
         // Convert MPP challenge to x402-compatible format for the negotiator
         let x402_response = convert_mpp_to_x402(&challenge)?;
@@ -88,10 +86,9 @@ impl PaymentProtocol for MppProtocol {
         // We need to extract the mpp_authorization field from the inner payload.
 
         // Decode the base64 payload
-        if let Ok(decoded) = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &payload.data,
-        ) {
+        if let Ok(decoded) =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &payload.data)
+        {
             if let Ok(json_str) = String::from_utf8(decoded) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
                     // Extract mpp_authorization from the payload field
@@ -116,9 +113,8 @@ impl PaymentProtocol for MppProtocol {
 
     fn parse_receipt_json(&self, response: &HttpResponse, _version: u32) -> Result<Option<String>> {
         if let Some(header) = response.get_header(PAYMENT_RECEIPT_HEADER) {
-            let receipt = mpp::parse_receipt(&header).map_err(|e| {
-                PurlError::Http(format!("Failed to parse MPP receipt: {}", e))
-            })?;
+            let receipt = mpp::parse_receipt(header)
+                .map_err(|e| PurlError::Http(format!("Failed to parse MPP receipt: {}", e)))?;
 
             let json = serde_json::to_string(&receipt)
                 .map_err(|e| PurlError::Http(format!("Failed to serialize receipt: {}", e)))?;
@@ -135,9 +131,10 @@ impl PaymentProtocol for MppProtocol {
 /// This allows the existing negotiator to work with MPP challenges.
 fn convert_mpp_to_x402(challenge: &mpp::PaymentChallenge) -> Result<serde_json::Value> {
     // Decode the request field to get payment details
-    let request: serde_json::Value = challenge.request.decode_value().map_err(|e| {
-        PurlError::Http(format!("Failed to decode MPP request: {}", e))
-    })?;
+    let request: serde_json::Value = challenge
+        .request
+        .decode_value()
+        .map_err(|e| PurlError::Http(format!("Failed to decode MPP request: {}", e)))?;
 
     // Extract fields from the request
     let amount = request
@@ -228,7 +225,8 @@ mod tests {
     #[test]
     fn test_should_handle_non_402() {
         let protocol = MppProtocol;
-        let header = r#"Payment id="abc123", realm="api", method="tempo", intent="charge", request="e30""#;
+        let header =
+            r#"Payment id="abc123", realm="api", method="tempo", intent="charge", request="e30""#;
         let response = make_response(200, vec![("www-authenticate", header)], "");
         assert!(!protocol.should_handle(&response));
     }
