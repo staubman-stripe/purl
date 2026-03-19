@@ -437,8 +437,31 @@ impl Config {
     /// Detect which payment method is available based on config
     pub fn available_payment_methods(&self) -> Vec<PaymentMethod> {
         let mut methods = Vec::new();
-        if self.evm.is_some() || self.evm_private_key.is_some() {
+        if self.evm_private_key.is_some() {
             methods.push(PaymentMethod::Evm);
+        } else if let Some(evm) = &self.evm {
+            // Check if this is a Tempo wallet by reading the keystore
+            let is_tempo = evm
+                .keystore
+                .as_ref()
+                .and_then(|path| {
+                    std::fs::read_to_string(path).ok().and_then(|content| {
+                        serde_json::from_str::<serde_json::Value>(&content)
+                            .ok()
+                            .and_then(|json| {
+                                json.get("chain")
+                                    .and_then(|c| c.as_str())
+                                    .map(|c| c == "tempo")
+                            })
+                    })
+                })
+                .unwrap_or(false);
+
+            if is_tempo {
+                methods.push(PaymentMethod::Tempo);
+            } else {
+                methods.push(PaymentMethod::Evm);
+            }
         }
         if self.solana.is_some() {
             methods.push(PaymentMethod::Solana);
@@ -516,6 +539,8 @@ pub enum PaymentMethod {
     Evm,
     /// Solana blockchain
     Solana,
+    /// Tempo blockchain (EVM-compatible)
+    Tempo,
 }
 
 impl PaymentMethod {
@@ -523,6 +548,7 @@ impl PaymentMethod {
         match self {
             PaymentMethod::Evm => "evm",
             PaymentMethod::Solana => "solana",
+            PaymentMethod::Tempo => "tempo",
         }
     }
 
@@ -531,6 +557,7 @@ impl PaymentMethod {
         match self {
             PaymentMethod::Evm => "EVM",
             PaymentMethod::Solana => "Solana",
+            PaymentMethod::Tempo => "Tempo",
         }
     }
 }

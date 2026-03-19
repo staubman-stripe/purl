@@ -1,6 +1,6 @@
 //! Integration tests for payment providers
 
-use purl_lib::{Config, EvmConfig, SolanaConfig, PROVIDER_REGISTRY};
+use purl_lib::{Config, EvmConfig, PaymentMethod, SolanaConfig, PROVIDER_REGISTRY};
 
 #[test]
 fn test_provider_registry_is_initialized() {
@@ -177,4 +177,63 @@ fn test_multiple_providers_dont_conflict() {
     assert!(evm.is_some());
     assert!(solana.is_some());
     assert_ne!(evm.unwrap().name(), solana.unwrap().name());
+}
+
+#[test]
+fn test_find_tempo_provider() {
+    let registry = &*PROVIDER_REGISTRY;
+
+    let provider = registry.find_provider("tempo");
+    assert!(provider.is_some());
+    assert_eq!(provider.unwrap().name(), "Tempo");
+
+    let provider = registry.find_provider("tempo-moderato");
+    assert!(provider.is_some());
+    assert_eq!(provider.unwrap().name(), "Tempo");
+}
+
+#[test]
+fn test_find_tempo_provider_via_alias() {
+    let registry = &*PROVIDER_REGISTRY;
+
+    let provider = registry.find_provider("eip155:4217");
+    assert!(provider.is_some());
+    assert_eq!(provider.unwrap().name(), "Tempo");
+
+    let provider = registry.find_provider("eip155:42431");
+    assert!(provider.is_some());
+    assert_eq!(provider.unwrap().name(), "Tempo");
+}
+
+#[test]
+fn test_tempo_provider_does_not_handle_evm_networks() {
+    let registry = &*PROVIDER_REGISTRY;
+
+    let tempo = registry.find_provider("tempo").unwrap();
+
+    assert!(!tempo.supports_network("base"));
+    assert!(!tempo.supports_network("ethereum"));
+    assert!(!tempo.supports_network("solana"));
+    assert!(tempo.supports_network("tempo"));
+    assert!(tempo.supports_network("tempo-moderato"));
+}
+
+#[test]
+fn test_all_three_providers_distinct() {
+    let registry = &*PROVIDER_REGISTRY;
+
+    let evm = registry.find_provider("base").unwrap();
+    let solana = registry.find_provider("solana").unwrap();
+    let tempo = registry.find_provider("tempo-moderato").unwrap();
+
+    assert_ne!(evm.name(), solana.name());
+    assert_ne!(evm.name(), tempo.name());
+    assert_ne!(solana.name(), tempo.name());
+}
+
+#[test]
+fn test_payment_method_tempo() {
+    assert_eq!(PaymentMethod::Tempo.as_str(), "tempo");
+    assert_eq!(PaymentMethod::Tempo.display_name(), "Tempo");
+    assert_eq!(format!("{}", PaymentMethod::Tempo), "Tempo");
 }

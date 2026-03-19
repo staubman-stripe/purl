@@ -29,6 +29,9 @@ pub trait PaymentChallenge: Send + Sync + Debug {
     /// Check if this is a Solana network
     fn is_solana(&self) -> bool;
 
+    /// Check if this is a Tempo network
+    fn is_tempo(&self) -> bool;
+
     /// Get the maximum timeout in seconds
     fn max_timeout_seconds(&self) -> u64;
 
@@ -46,6 +49,9 @@ pub trait PaymentChallenge: Send + Sync + Debug {
 
     /// Get the MIME type of the resource
     fn mime_type(&self) -> &str;
+
+    /// Get the name of the protocol that produced this challenge (e.g., "mpp", "x402")
+    fn protocol_name(&self) -> &str;
 
     /// Downcast to concrete type for protocol-specific operations
     fn as_any(&self) -> &dyn Any;

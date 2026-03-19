@@ -20,6 +20,8 @@ pub mod networks {
     pub const OPTIMISM: &str = "optimism";
     pub const SOLANA: &str = "solana";
     pub const SOLANA_DEVNET: &str = "solana-devnet";
+    pub const TEMPO: &str = "tempo";
+    pub const TEMPO_MODERATO: &str = "tempo-moderato";
 }
 
 /// Chain type (blockchain family)
@@ -28,6 +30,7 @@ pub mod networks {
 pub enum ChainType {
     Evm,
     Solana,
+    Tempo,
 }
 
 /// Built-in network definition (compile-time constant)
@@ -155,6 +158,26 @@ const BUILTIN_NETWORKS: &[BuiltinNetwork] = &[
         rpc_url: "https://api.devnet.solana.com",
         aliases: &["solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"],
         explorer_url: Some("https://solscan.io?cluster=devnet"),
+    },
+    BuiltinNetwork {
+        id: networks::TEMPO,
+        chain_type: ChainType::Tempo,
+        chain_id: Some(4217),
+        mainnet: true,
+        display_name: "Tempo",
+        rpc_url: "https://rpc.tempo.xyz",
+        aliases: &["eip155:4217"],
+        explorer_url: Some("https://explore.tempo.xyz"),
+    },
+    BuiltinNetwork {
+        id: networks::TEMPO_MODERATO,
+        chain_type: ChainType::Tempo,
+        chain_id: Some(42431),
+        mainnet: false,
+        display_name: "Tempo Moderato",
+        rpc_url: "https://rpc.moderato.tempo.xyz",
+        aliases: &["eip155:42431"],
+        explorer_url: Some("https://explore.tempo.xyz"),
     },
 ];
 
@@ -352,6 +375,13 @@ impl NetworkRegistry {
             .unwrap_or(false)
     }
 
+    /// Check if a network ID is a Tempo network
+    pub fn is_tempo(&self, id: &str) -> bool {
+        self.get(id)
+            .map(|n| n.chain_type == ChainType::Tempo)
+            .unwrap_or(false)
+    }
+
     /// Get the number of registered networks
     pub fn len(&self) -> usize {
         self.networks.len()
@@ -383,6 +413,8 @@ pub enum Network {
     Optimism,
     Solana,
     SolanaDevnet,
+    Tempo,
+    TempoModerato,
 }
 
 impl Network {
@@ -400,6 +432,8 @@ impl Network {
             Network::Optimism => networks::OPTIMISM,
             Network::Solana => networks::SOLANA,
             Network::SolanaDevnet => networks::SOLANA_DEVNET,
+            Network::Tempo => networks::TEMPO,
+            Network::TempoModerato => networks::TEMPO_MODERATO,
         }
     }
 
@@ -413,7 +447,7 @@ impl Network {
     }
 
     /// Get all network variants as a const array.
-    pub const fn all() -> [Network; 11] {
+    pub const fn all() -> [Network; 13] {
         [
             Network::Ethereum,
             Network::EthereumSepolia,
@@ -426,6 +460,8 @@ impl Network {
             Network::Optimism,
             Network::Solana,
             Network::SolanaDevnet,
+            Network::Tempo,
+            Network::TempoModerato,
         ]
     }
 
@@ -445,12 +481,12 @@ impl Network {
     }
 
     /// Get all networks of a specific chain type, optionally filtered by name.
-    /// Only returns networks that have USDC support configured.
+    /// Only returns networks that have token support configured (USDC for most, TUSD for Tempo).
     pub fn by_chain_type(chain_type: ChainType, name_filter: Option<&str>) -> Vec<Network> {
         Network::all()
             .into_iter()
             .filter(|n| n.chain_type() == chain_type)
-            .filter(|n| n.usdc_config().is_some())
+            .filter(|n| n.default_token_config().is_some())
             .filter(|n| name_filter.is_none_or(|f| n.as_str() == f))
             .collect()
     }
@@ -472,6 +508,8 @@ impl FromStr for Network {
             networks::OPTIMISM => Ok(Network::Optimism),
             networks::SOLANA => Ok(Network::Solana),
             networks::SOLANA_DEVNET => Ok(Network::SolanaDevnet),
+            networks::TEMPO => Ok(Network::Tempo),
+            networks::TEMPO_MODERATO => Ok(Network::TempoModerato),
             _ => Err(format!("Unknown network: {s}")),
         }
     }
@@ -543,8 +581,39 @@ impl Network {
                 currency: currencies::USDC,
                 address: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
             }),
+            Network::Tempo => Some(TokenConfig {
+                currency: currencies::USDC,
+                address: "0x20C000000000000000000000b9537d11c60E8b50",
+            }),
+            // Tempo Moderato uses pathUSD - handled separately
+            Network::TempoModerato => None,
             // Other networks don't have USDC support yet
             _ => None,
+        }
+    }
+
+    /// Get default token configuration for Tempo testnet networks (pathUSD on testnet)
+    ///
+    /// On Tempo, there is no native token - users transact with TIP-20 stablecoins.
+    /// For Tempo Moderato (testnet), the default token is pathUSD.
+    /// For Tempo mainnet, USDC is used instead (via usdc_config).
+    pub const fn tusd_config(&self) -> Option<TokenConfig> {
+        use crate::currency::currencies;
+
+        match self {
+            Network::TempoModerato => Some(TokenConfig {
+                currency: currencies::PATHUSD,
+                address: "0x20c0000000000000000000000000000000000000",
+            }),
+            _ => None,
+        }
+    }
+
+    /// Get the default token configuration for this network (USDC for most, pathUSD for Tempo Moderato)
+    pub const fn default_token_config(&self) -> Option<TokenConfig> {
+        match self {
+            Network::TempoModerato => self.tusd_config(),
+            _ => self.usdc_config(),
         }
     }
 }
@@ -576,6 +645,15 @@ pub fn is_evm_network(name: &str) -> bool {
 pub fn is_solana_network(name: &str) -> bool {
     let canonical = NETWORK_REGISTRY.resolve_alias(name);
     NETWORK_REGISTRY.is_solana(canonical)
+}
+
+/// Check if a network name refers to a Tempo network.
+///
+/// Supports both v1 names and v2 CAIP-2 formats.
+#[must_use]
+pub fn is_tempo_network(name: &str) -> bool {
+    let canonical = NETWORK_REGISTRY.resolve_alias(name);
+    NETWORK_REGISTRY.is_tempo(canonical)
 }
 
 /// Get the EVM chain ID for a network by name.
@@ -696,6 +774,8 @@ mod tests {
             "optimism",
             "solana",
             "solana-devnet",
+            "tempo",
+            "tempo-moderato",
         ] {
             let network: Network = network_str.parse().expect("should parse");
             assert_eq!(network.as_str(), *network_str);
@@ -761,5 +841,59 @@ mod tests {
         assert_eq!(get_evm_chain_id("base"), Some(8453));
         assert_eq!(get_evm_chain_id("eip155:8453"), Some(8453));
         assert_eq!(get_evm_chain_id("eip155:84532"), Some(84532));
+    }
+
+    #[test]
+    fn test_tempo_network() {
+        let tempo = get_network("tempo-moderato").expect("tempo-moderato should exist");
+        assert_eq!(tempo.chain_type, ChainType::Tempo);
+        assert_eq!(tempo.chain_id, Some(42431));
+        assert!(!tempo.mainnet);
+        assert!(tempo.is_testnet());
+
+        // Explorer URL
+        assert!(tempo.explorer_url.is_some());
+        let explorer = tempo.explorer_url.as_ref().unwrap();
+        assert!(explorer.contains("explore.tempo.xyz"));
+
+        // Address URL
+        let addr_url = tempo.address_url("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca");
+        assert!(addr_url.is_some());
+        assert!(addr_url
+            .unwrap()
+            .contains("explore.tempo.xyz/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"));
+
+        // Transaction URL
+        let tx_url = tempo.tx_url("0x123abc");
+        assert!(tx_url.is_some());
+        assert!(tx_url.unwrap().contains("explore.tempo.xyz/tx/0x123abc"));
+
+        // Tempo network resolved from alias
+        assert_eq!(resolve_network_alias("eip155:42431"), "tempo-moderato");
+        assert!(is_tempo_network("tempo-moderato"));
+        assert!(is_tempo_network("eip155:42431"));
+    }
+
+    #[test]
+    fn test_tempo_pathusd_config() {
+        let tempo = Network::TempoModerato;
+
+        // Tempo doesn't have USDC config
+        assert!(tempo.usdc_config().is_none());
+
+        // Tempo Moderato has pathUSD as default token
+        let token_config = tempo.tusd_config().expect("Tempo should have pathUSD");
+        assert_eq!(token_config.currency.symbol, "pathUSD");
+        assert_eq!(token_config.currency.decimals, 6);
+        assert_eq!(
+            token_config.address,
+            "0x20c0000000000000000000000000000000000000"
+        );
+
+        // default_token_config returns pathUSD for Tempo
+        let default_config = tempo
+            .default_token_config()
+            .expect("Tempo should have default token");
+        assert_eq!(default_config.currency.symbol, "pathUSD");
     }
 }

@@ -1,5 +1,5 @@
 use crate::network::{is_evm_network, is_solana_network};
-use crate::protocol::{PaymentChallenge, PaymentReceipt};
+use crate::protocol::PaymentChallenge;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::fmt;
@@ -196,6 +196,14 @@ impl PaymentRequirements {
                 // Check if network is in solana namespace
                 requirements.network.starts_with("solana:")
             }
+        }
+    }
+
+    pub fn is_tempo(&self) -> bool {
+        use crate::network::is_tempo_network;
+        match self {
+            PaymentRequirements::V1(v1) => is_tempo_network(&v1.network),
+            PaymentRequirements::V2 { requirements, .. } => is_tempo_network(&requirements.network),
         }
     }
 
@@ -398,63 +406,8 @@ impl PaymentPayload {
     }
 }
 
-/// Settlement Response (X-PAYMENT-RESPONSE header content)
-///
-/// This is a unified type that can represent both v1 and v2 protocol responses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SettlementResponse {
-    V1(v1::SettlementResponse),
-    V2(v2::SettlementResponse),
-}
-
-impl SettlementResponse {
-    /// Check if the settlement was successful
-    pub fn is_success(&self) -> bool {
-        match self {
-            SettlementResponse::V1(v1) => v1.success.unwrap_or(false),
-            SettlementResponse::V2(v2) => v2.success,
-        }
-    }
-
-    /// Get the error reason, if any
-    pub fn error_reason(&self) -> Option<&str> {
-        match self {
-            SettlementResponse::V1(v1) => v1.error_reason.as_deref(),
-            SettlementResponse::V2(v2) => v2.error_reason.as_deref(),
-        }
-    }
-
-    /// Get the transaction hash
-    pub fn transaction(&self) -> &str {
-        match self {
-            SettlementResponse::V1(v1) => &v1.transaction,
-            SettlementResponse::V2(v2) => &v2.transaction,
-        }
-    }
-
-    /// Get the network (in original format - v1 or v2)
-    pub fn network(&self) -> &str {
-        match self {
-            SettlementResponse::V1(v1) => &v1.network,
-            SettlementResponse::V2(v2) => &v2.network,
-        }
-    }
-
-    /// Get the payer address, if available
-    pub fn payer(&self) -> Option<&str> {
-        match self {
-            SettlementResponse::V1(v1) => {
-                if v1.payer.is_empty() {
-                    None
-                } else {
-                    Some(&v1.payer)
-                }
-            }
-            SettlementResponse::V2(v2) => v2.payer.as_deref(),
-        }
-    }
-}
+// Re-export from protocol layer where the unified type now lives
+pub use crate::protocol::SettlementResponse;
 
 // ==================== Trait Implementations ====================
 
@@ -486,6 +439,10 @@ impl PaymentChallenge for PaymentRequirements {
         PaymentRequirements::is_solana(self)
     }
 
+    fn is_tempo(&self) -> bool {
+        PaymentRequirements::is_tempo(self)
+    }
+
     fn max_timeout_seconds(&self) -> u64 {
         PaymentRequirements::max_timeout_seconds(self)
     }
@@ -510,30 +467,8 @@ impl PaymentChallenge for PaymentRequirements {
         PaymentRequirements::mime_type(self)
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl PaymentReceipt for SettlementResponse {
-    fn is_success(&self) -> bool {
-        SettlementResponse::is_success(self)
-    }
-
-    fn transaction(&self) -> &str {
-        SettlementResponse::transaction(self)
-    }
-
-    fn network(&self) -> &str {
-        SettlementResponse::network(self)
-    }
-
-    fn error_reason(&self) -> Option<&str> {
-        SettlementResponse::error_reason(self)
-    }
-
-    fn payer(&self) -> Option<&str> {
-        SettlementResponse::payer(self)
+    fn protocol_name(&self) -> &str {
+        "x402"
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -614,40 +549,6 @@ mod tests {
         assert_eq!(accepts[0].scheme(), "exact");
         assert!(accepts[0].is_evm());
         assert!(!accepts[0].is_solana());
-    }
-
-    #[test]
-    fn test_parse_v1_settlement_response() {
-        let json = r#"{
-            "success": true,
-            "transaction": "0xabc123",
-            "network": "base-sepolia",
-            "payer": "0x1234..."
-        }"#;
-
-        let response: SettlementResponse = serde_json::from_str(json).expect("should parse");
-        assert!(response.is_success());
-        assert_eq!(response.transaction(), "0xabc123");
-        assert_eq!(response.network(), "base-sepolia");
-        assert_eq!(response.payer(), Some("0x1234..."));
-    }
-
-    #[test]
-    fn test_parse_v2_settlement_response() {
-        let json = r#"{
-            "success": true,
-            "transaction": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "network": "eip155:84532",
-            "payer": "0x857b06519E91e3A54538791bDbb0E22373e36b66"
-        }"#;
-
-        let response: SettlementResponse = serde_json::from_str(json).expect("should parse");
-        assert!(response.is_success());
-        assert_eq!(
-            response.transaction(),
-            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-        );
-        assert_eq!(response.network(), "eip155:84532");
     }
 
     #[test]
@@ -799,41 +700,5 @@ mod tests {
         assert_eq!(challenge.description(), "API access");
         assert_eq!(challenge.mime_type(), "application/json");
         assert!(challenge.extra().is_some());
-    }
-
-    #[test]
-    fn test_payment_receipt_trait() {
-        let settlement = SettlementResponse::V1(v1::SettlementResponse {
-            success: Some(true),
-            error_reason: None,
-            transaction: "0xabc123".to_string(),
-            network: "base".to_string(),
-            payer: "0x1234".to_string(),
-        });
-        let receipt: &dyn PaymentReceipt = &settlement;
-
-        assert!(receipt.is_success());
-        assert_eq!(receipt.transaction(), "0xabc123");
-        assert_eq!(receipt.network(), "base");
-        assert!(receipt.error_reason().is_none());
-        assert_eq!(receipt.payer(), Some("0x1234"));
-    }
-
-    #[test]
-    fn test_payment_receipt_trait_v2() {
-        let settlement = SettlementResponse::V2(v2::SettlementResponse {
-            success: false,
-            error_reason: Some("Insufficient funds".to_string()),
-            transaction: "0xdef456".to_string(),
-            network: "eip155:84532".to_string(),
-            payer: Some("0x5678".to_string()),
-        });
-        let receipt: &dyn PaymentReceipt = &settlement;
-
-        assert!(!receipt.is_success());
-        assert_eq!(receipt.transaction(), "0xdef456");
-        assert_eq!(receipt.network(), "eip155:84532");
-        assert_eq!(receipt.error_reason(), Some("Insufficient funds"));
-        assert_eq!(receipt.payer(), Some("0x5678"));
     }
 }

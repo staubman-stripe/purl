@@ -41,6 +41,7 @@ impl From<Network> for NetworkListItem {
             chain_type: match info.chain_type {
                 ChainType::Evm => "EVM".to_string(),
                 ChainType::Solana => "Solana".to_string(),
+                ChainType::Tempo => "Tempo".to_string(),
             },
             chain_id: info.chain_id,
             network_type: if info.mainnet {
@@ -61,6 +62,7 @@ impl From<Network> for NetworkDetail {
             chain_type: match info.chain_type {
                 ChainType::Evm => "EVM".to_string(),
                 ChainType::Solana => "Solana".to_string(),
+                ChainType::Tempo => "Tempo".to_string(),
             },
             chain_id: info.chain_id,
             mainnet: info.mainnet,

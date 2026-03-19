@@ -1,8 +1,9 @@
 //! Integration tests for network and token configuration
 
-use purl_lib::constants::get_token_decimals;
+use purl_lib::constants::{get_token_decimals, get_token_symbol};
 use purl_lib::network::{
-    get_evm_chain_id, get_network, is_evm_network, is_solana_network, ChainType, Network,
+    get_evm_chain_id, get_network, is_evm_network, is_solana_network, is_tempo_network,
+    resolve_network_alias, ChainType, Network,
 };
 
 #[test]
@@ -286,5 +287,227 @@ fn test_solana_addresses_are_case_sensitive() {
 fn test_chain_type_equality() {
     assert_eq!(ChainType::Evm, ChainType::Evm);
     assert_eq!(ChainType::Solana, ChainType::Solana);
+    assert_eq!(ChainType::Tempo, ChainType::Tempo);
     assert_ne!(ChainType::Evm, ChainType::Solana);
+    assert_ne!(ChainType::Evm, ChainType::Tempo);
+    assert_ne!(ChainType::Solana, ChainType::Tempo);
+}
+
+// Tempo network tests
+
+#[test]
+fn test_get_tempo_network() {
+    let network = get_network("tempo");
+    assert!(network.is_some(), "tempo should exist");
+
+    let info = network.unwrap();
+    assert_eq!(info.chain_type, ChainType::Tempo);
+    assert_eq!(info.chain_id, Some(4217));
+    assert!(info.mainnet);
+    assert!(!info.is_testnet());
+    assert_eq!(info.display_name, "Tempo");
+}
+
+#[test]
+fn test_get_tempo_moderato_network() {
+    let network = get_network("tempo-moderato");
+    assert!(network.is_some(), "tempo-moderato should exist");
+
+    let info = network.unwrap();
+    assert_eq!(info.chain_type, ChainType::Tempo);
+    assert_eq!(info.chain_id, Some(42431));
+    assert!(!info.mainnet);
+    assert!(info.is_testnet());
+    assert_eq!(info.display_name, "Tempo Moderato");
+}
+
+#[test]
+fn test_is_tempo_network() {
+    assert!(is_tempo_network("tempo"));
+    assert!(is_tempo_network("tempo-moderato"));
+    assert!(is_tempo_network("eip155:4217"));
+    assert!(is_tempo_network("eip155:42431"));
+    assert!(!is_tempo_network("base"));
+    assert!(!is_tempo_network("solana"));
+    assert!(!is_tempo_network("unknown"));
+}
+
+#[test]
+fn test_tempo_network_alias() {
+    assert_eq!(resolve_network_alias("eip155:4217"), "tempo");
+    assert_eq!(resolve_network_alias("eip155:42431"), "tempo-moderato");
+}
+
+#[test]
+fn test_tempo_chain_id() {
+    assert_eq!(get_evm_chain_id("tempo"), Some(4217));
+    assert_eq!(get_evm_chain_id("eip155:4217"), Some(4217));
+    assert_eq!(get_evm_chain_id("tempo-moderato"), Some(42431));
+    assert_eq!(get_evm_chain_id("eip155:42431"), Some(42431));
+}
+
+#[test]
+fn test_tempo_is_not_evm_or_solana() {
+    assert!(!is_evm_network("tempo-moderato"));
+    assert!(!is_solana_network("tempo-moderato"));
+}
+
+#[test]
+fn test_tempo_network_enum() {
+    let tempo: Network = "tempo".parse().unwrap();
+    assert_eq!(tempo, Network::Tempo);
+    assert_eq!(tempo.as_str(), "tempo");
+    assert_eq!(tempo.chain_type(), ChainType::Tempo);
+    assert!(!tempo.is_testnet());
+    assert!(tempo.is_mainnet());
+
+    let tempo_moderato: Network = "tempo-moderato".parse().unwrap();
+    assert_eq!(tempo_moderato, Network::TempoModerato);
+    assert_eq!(tempo_moderato.as_str(), "tempo-moderato");
+    assert_eq!(tempo_moderato.chain_type(), ChainType::Tempo);
+    assert!(tempo_moderato.is_testnet());
+    assert!(!tempo_moderato.is_mainnet());
+}
+
+#[test]
+fn test_tempo_has_explorer_url() {
+    // Mainnet
+    let info = get_network("tempo").unwrap();
+    assert!(info.explorer_url.is_some());
+
+    let tx_url = info.tx_url("0xabc123");
+    assert!(tx_url.is_some());
+    assert!(tx_url.unwrap().contains("explore.tempo.xyz/tx/0xabc123"));
+
+    let addr_url = info.address_url("0x1234");
+    assert!(addr_url.is_some());
+    assert!(addr_url
+        .unwrap()
+        .contains("explore.tempo.xyz/address/0x1234"));
+
+    // Testnet (shared explorer)
+    let info = get_network("tempo-moderato").unwrap();
+    assert!(info.explorer_url.is_some());
+    assert!(info
+        .tx_url("0xabc123")
+        .unwrap()
+        .contains("explore.tempo.xyz/tx/0xabc123"));
+}
+
+#[test]
+fn test_tempo_default_token_config() {
+    // Tempo mainnet uses USDC
+    let tempo = Network::Tempo;
+    let config = tempo.default_token_config();
+    assert!(config.is_some());
+    let token = config.unwrap();
+    assert_eq!(token.currency.symbol, "USDC");
+    assert_eq!(token.currency.decimals, 6);
+    assert_eq!(token.address, "0x20C000000000000000000000b9537d11c60E8b50");
+
+    // Tempo mainnet has USDC config directly
+    assert!(tempo.usdc_config().is_some());
+
+    // Tempo Moderato should NOT have USDC
+    let moderato = Network::TempoModerato;
+    assert!(moderato.usdc_config().is_none());
+
+    // Tempo Moderato should have pathUSD as default
+    let config = moderato.default_token_config();
+    assert!(config.is_some());
+    let token = config.unwrap();
+    assert_eq!(token.currency.symbol, "pathUSD");
+    assert_eq!(token.currency.decimals, 6);
+    assert_eq!(token.address, "0x20c0000000000000000000000000000000000000");
+}
+
+#[test]
+fn test_tempo_token_decimals() {
+    // USDC on Tempo mainnet
+    let decimals = get_token_decimals("tempo", "0x20c000000000000000000000b9537d11c60e8b50");
+    assert!(decimals.is_ok());
+    assert_eq!(decimals.unwrap(), 6);
+
+    // pathUSD on Tempo Moderato
+    let decimals = get_token_decimals(
+        "tempo-moderato",
+        "0x20c0000000000000000000000000000000000000",
+    );
+    assert!(decimals.is_ok());
+    assert_eq!(decimals.unwrap(), 6);
+
+    // alphaUSD on Tempo Moderato
+    let decimals = get_token_decimals(
+        "tempo-moderato",
+        "0x20c0000000000000000000000000000000000001",
+    );
+    assert!(decimals.is_ok());
+    assert_eq!(decimals.unwrap(), 6);
+}
+
+#[test]
+fn test_tempo_token_symbols() {
+    // Tempo mainnet USDC
+    let symbol = get_token_symbol("tempo", "0x20c000000000000000000000b9537d11c60e8b50");
+    assert_eq!(symbol, Some("USDC"));
+
+    // Tempo Moderato pathUSD
+    let symbol = get_token_symbol(
+        "tempo-moderato",
+        "0x20c0000000000000000000000000000000000000",
+    );
+    assert_eq!(symbol, Some("pathUSD"));
+
+    let symbol = get_token_symbol(
+        "tempo-moderato",
+        "0x20c0000000000000000000000000000000000001",
+    );
+    assert_eq!(symbol, Some("alphaUSD"));
+
+    let symbol = get_token_symbol(
+        "tempo-moderato",
+        "0x20c0000000000000000000000000000000000002",
+    );
+    assert_eq!(symbol, Some("betaUSD"));
+
+    let symbol = get_token_symbol(
+        "tempo-moderato",
+        "0x20c0000000000000000000000000000000000003",
+    );
+    assert_eq!(symbol, Some("thetaUSD"));
+}
+
+#[test]
+fn test_tempo_networks_have_chain_ids() {
+    for network in Network::all() {
+        let info = network.info();
+        if info.chain_type == ChainType::Tempo {
+            assert!(
+                info.chain_id.is_some(),
+                "Tempo network {} should have a chain_id",
+                network
+            );
+        }
+    }
+}
+
+#[test]
+fn test_network_by_chain_type_tempo() {
+    let tempo_networks = Network::by_chain_type(ChainType::Tempo, None);
+    assert!(!tempo_networks.is_empty());
+    assert!(tempo_networks.contains(&Network::Tempo));
+    assert!(tempo_networks.contains(&Network::TempoModerato));
+
+    // Filtering by name
+    let filtered = Network::by_chain_type(ChainType::Tempo, Some("tempo"));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0], Network::Tempo);
+
+    let filtered = Network::by_chain_type(ChainType::Tempo, Some("tempo-moderato"));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0], Network::TempoModerato);
+
+    // Filtering by non-existent name
+    let filtered = Network::by_chain_type(ChainType::Tempo, Some("nonexistent"));
+    assert!(filtered.is_empty());
 }

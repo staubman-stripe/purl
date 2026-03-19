@@ -3,6 +3,7 @@ use crate::currency::Currency;
 use crate::error::{PurlError, Result};
 use crate::network::{get_network, ChainType, Network};
 use crate::payment_provider::{DryRunInfo, NetworkBalance, PaymentProvider};
+use crate::protocol::PaymentChallenge;
 use crate::x402::{PaymentPayload, PaymentRequirements};
 use async_trait::async_trait;
 use base64::Engine;
@@ -97,18 +98,28 @@ impl PaymentProvider for SolanaProvider {
 
     async fn create_payment(
         &self,
-        requirements: &PaymentRequirements,
+        challenge: &dyn PaymentChallenge,
         config: &Config,
     ) -> Result<PaymentPayload> {
+        // Downcast to x402 PaymentRequirements
+        let requirements = challenge
+            .as_any()
+            .downcast_ref::<PaymentRequirements>()
+            .ok_or_else(|| {
+                PurlError::InvalidConfig(
+                    "Solana provider expects x402 PaymentRequirements".to_string(),
+                )
+            })?;
+
         let keypair = Self::load_keypair(config)?;
 
         let source_pubkey = keypair.pubkey();
-        let destination_pubkey = Pubkey::from_str(requirements.pay_to()).map_err(|_| {
+        let destination_pubkey = Pubkey::from_str(challenge.recipient()).map_err(|_| {
             PurlError::invalid_address(
                 "The server provided an invalid recipient address.".to_string(),
             )
         })?;
-        let mint_pubkey = Pubkey::from_str(requirements.asset()).map_err(|_| {
+        let mint_pubkey = Pubkey::from_str(challenge.asset()).map_err(|_| {
             PurlError::invalid_address("The server provided an invalid token address.".to_string())
         })?;
         let fee_payer = requirements
@@ -120,7 +131,7 @@ impl PaymentProvider for SolanaProvider {
             )
         })?;
 
-        let amount_parsed = requirements.parse_max_amount().map_err(|_| {
+        let amount_parsed: crate::x402::Amount = challenge.amount().parse().map_err(|_| {
             PurlError::InvalidAmount("The server provided an invalid payment amount.".to_string())
         })?;
         let amount: u64 = amount_parsed
@@ -155,7 +166,7 @@ impl PaymentProvider for SolanaProvider {
         let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(1);
 
         let decimals =
-            crate::constants::get_token_decimals(requirements.network(), requirements.asset())?;
+            crate::constants::get_token_decimals(challenge.network(), challenge.asset())?;
 
         let transfer_ix = if is_token_2022 {
             spl_token_2022::instruction::transfer_checked(
@@ -192,7 +203,7 @@ impl PaymentProvider for SolanaProvider {
         };
 
         let instructions = vec![compute_limit_ix, compute_price_ix, transfer_ix];
-        let recent_blockhash = Self::get_recent_blockhash(requirements.network())?;
+        let recent_blockhash = Self::get_recent_blockhash(challenge.network())?;
 
         let message =
             Message::new_with_blockhash(&instructions, Some(&fee_payer_pubkey), &recent_blockhash);
@@ -215,8 +226,8 @@ impl PaymentProvider for SolanaProvider {
         // Create version-appropriate payload based on requirements version
         let payment_payload = match requirements {
             PaymentRequirements::V1(_) => PaymentPayload::new_v1(
-                requirements.scheme().to_string(),
-                requirements.network().to_string(),
+                challenge.scheme().to_string(),
+                challenge.network().to_string(),
                 serde_json::to_value(solana_payload)?,
             ),
             PaymentRequirements::V2 {
@@ -237,26 +248,32 @@ impl PaymentProvider for SolanaProvider {
         "Solana"
     }
 
-    fn dry_run(&self, requirements: &PaymentRequirements, config: &Config) -> Result<DryRunInfo> {
+    fn dry_run(&self, challenge: &dyn PaymentChallenge, config: &Config) -> Result<DryRunInfo> {
+        // Downcast to get Solana-specific fields
+        let requirements = challenge.as_any().downcast_ref::<PaymentRequirements>();
+
         let solana_config = config.require_solana()?;
 
-        let token_program = if requirements.solana_token_program().is_some() {
+        let token_program = if requirements
+            .map(|r| r.solana_token_program().is_some())
+            .unwrap_or(false)
+        {
             SPL_TOKEN_2022_NAME
         } else {
             SPL_TOKEN_NAME
         };
 
-        let amount = requirements.parse_max_amount().map_err(|_| {
+        let amount: crate::x402::Amount = challenge.amount().parse().map_err(|_| {
             PurlError::InvalidAmount("The server provided an invalid payment amount.".to_string())
         })?;
 
         Ok(DryRunInfo {
             provider: format!("Solana ({token_program})"),
-            network: requirements.network().to_string(),
+            network: challenge.network().to_string(),
             amount: amount.to_string(),
-            asset: requirements.asset().to_string(),
+            asset: challenge.asset().to_string(),
             from: solana_config.get_address()?,
-            to: requirements.pay_to().to_string(),
+            to: challenge.recipient().to_string(),
             estimated_fee: Some("5000".to_string()), // ~5000 lamports for transaction
         })
     }

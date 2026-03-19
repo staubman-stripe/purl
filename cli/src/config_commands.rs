@@ -108,7 +108,7 @@ pub fn validate_command(cli: &Cli) -> Result<()> {
     println!("Configuration is valid: {}", config_path.display());
     for method in &available_methods {
         let status = match method {
-            purl_lib::PaymentMethod::Evm => config
+            purl_lib::PaymentMethod::Evm | purl_lib::PaymentMethod::Tempo => config
                 .evm
                 .as_ref()
                 .and_then(|evm| evm.get_address().ok())

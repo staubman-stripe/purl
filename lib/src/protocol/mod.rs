@@ -12,9 +12,11 @@
 //! - [`ProtocolRegistry`] - Registry for detecting and selecting protocols
 
 mod registry;
+mod settlement;
 mod types;
 
 pub use registry::{ProtocolRegistry, PROTOCOL_REGISTRY};
+pub use settlement::SettlementResponse;
 pub use types::{CredentialPayload, PaymentChallenge, PaymentReceipt};
 
 use crate::error::Result;
@@ -48,10 +50,16 @@ pub trait PaymentProtocol: Send + Sync {
     /// Should check for protocol-specific headers or body markers.
     fn should_handle(&self, response: &HttpResponse) -> bool;
 
-    /// Parse the payment challenge from the 402 response.
+    /// Parse the payment challenges from the 402 response.
+    ///
+    /// Returns protocol-agnostic payment challenges as trait objects.
+    fn parse_challenges(&self, response: &HttpResponse) -> Result<Vec<Box<dyn PaymentChallenge>>>;
+
+    /// Parse the payment challenge from the 402 response (legacy JSON interface).
     ///
     /// Returns the raw requirements JSON for further processing by the negotiator.
     /// The negotiator will parse this into protocol-specific types.
+    #[deprecated(note = "Use parse_challenges() instead")]
     fn parse_challenge_json(&self, response: &HttpResponse) -> Result<String>;
 
     /// Create the credential header for the payment request.

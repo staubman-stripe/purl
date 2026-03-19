@@ -6,12 +6,16 @@ pub mod evm;
 #[cfg(feature = "solana")]
 pub mod solana;
 
+pub mod tempo;
+
 // Re-export providers when available
 #[cfg(feature = "evm")]
 pub use evm::EvmProvider;
 
 #[cfg(feature = "solana")]
 pub use solana::SolanaProvider;
+
+pub use tempo::TempoProvider;
 
 use crate::payment_provider::PaymentProvider;
 

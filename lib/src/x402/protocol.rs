@@ -5,11 +5,11 @@
 
 use crate::error::Result;
 use crate::http::HttpResponse;
-use crate::protocol::{CredentialPayload, PaymentProtocol};
+use crate::protocol::{CredentialPayload, PaymentChallenge, PaymentProtocol};
 
 use super::{
-    PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER, PAYMENT_SIGNATURE_HEADER,
-    V1_X_PAYMENT_HEADER, V1_X_PAYMENT_RESPONSE_HEADER,
+    PaymentRequirementsResponse, PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER,
+    PAYMENT_SIGNATURE_HEADER, V1_X_PAYMENT_HEADER, V1_X_PAYMENT_RESPONSE_HEADER,
 };
 
 /// Protocol name constant for x402
@@ -47,6 +47,18 @@ impl PaymentProtocol for X402Protocol {
         false
     }
 
+    fn parse_challenges(&self, response: &HttpResponse) -> Result<Vec<Box<dyn PaymentChallenge>>> {
+        let json = super::payment_requirements_json(response)?;
+        let requirements: PaymentRequirementsResponse = serde_json::from_str(&json)?;
+        let challenges: Vec<Box<dyn PaymentChallenge>> = requirements
+            .accepts()
+            .into_iter()
+            .map(|req| Box::new(req) as Box<dyn PaymentChallenge>)
+            .collect();
+        Ok(challenges)
+    }
+
+    #[allow(deprecated)]
     fn parse_challenge_json(&self, response: &HttpResponse) -> Result<String> {
         super::payment_requirements_json(response)
     }

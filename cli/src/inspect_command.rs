@@ -2,12 +2,16 @@
 
 use anyhow::{Context, Result};
 use colored::Colorize;
-use purl_lib::{HttpClientBuilder, PaymentMethod, PaymentRequirementsResponse};
+use purl_lib::protocol::PaymentChallenge;
+use purl_lib::{
+    HttpClientBuilder, HttpMethod, PaymentMethod, PaymentRequirementsResponse, PROTOCOL_REGISTRY,
+};
 use serde::Serialize;
 use std::borrow::Cow;
 
 use crate::cli::{Cli, OutputFormat};
 use crate::config_utils::load_config;
+use crate::hyperlink::address_link;
 
 /// Output format for a single payment option
 #[derive(Debug, Serialize)]
@@ -65,10 +69,45 @@ fn get_decimals(network: &str, asset: &str) -> Result<u8> {
 pub async fn inspect_command(cli: &Cli, url: &str) -> Result<()> {
     let config = load_config(cli.config.as_ref())?;
 
-    // Build HTTP client
+    // Determine HTTP method and body from CLI flags
+    let body = cli
+        .json
+        .as_ref()
+        .or(cli.data.as_ref())
+        .map(|s| s.as_bytes().to_vec());
+
+    let method = cli
+        .method
+        .as_ref()
+        .map(|s| HttpMethod::from_bytes(s.as_bytes()).unwrap_or(HttpMethod::GET))
+        .unwrap_or_else(|| {
+            if body.is_some() {
+                HttpMethod::POST
+            } else {
+                HttpMethod::GET
+            }
+        });
+
+    // Build HTTP client with headers
+    let mut headers = cli
+        .parse_headers()
+        .map_err(|e| anyhow::anyhow!("Invalid header: {}", e))?;
+
+    // Auto-set Content-Type for JSON data
+    if cli.json.is_some()
+        || cli
+            .data
+            .as_ref()
+            .map(|d| d.trim().starts_with('{') || d.trim().starts_with('['))
+            .unwrap_or(false)
+    {
+        headers.push(("Content-Type".to_string(), "application/json".to_string()));
+    }
+
     let mut builder = HttpClientBuilder::new()
         .verbose(cli.is_verbose())
-        .follow_redirects(cli.follow_redirects);
+        .follow_redirects(cli.follow_redirects)
+        .headers(&headers);
 
     if let Some(timeout) = cli.get_timeout() {
         builder = builder.timeout(timeout);
@@ -81,10 +120,10 @@ pub async fn inspect_command(cli: &Cli, url: &str) -> Result<()> {
     let client = builder.build()?;
 
     if cli.is_verbose() && cli.should_show_output() {
-        eprintln!("Inspecting payment requirements for: {url}");
+        eprintln!("Inspecting payment requirements for: {url} ({})", method);
     }
 
-    let response = client.get(url).await?;
+    let response = client.request(method, url, body.as_deref()).await?;
 
     if !response.is_payment_required() {
         anyhow::bail!(
@@ -93,23 +132,56 @@ pub async fn inspect_command(cli: &Cli, url: &str) -> Result<()> {
         );
     }
 
-    let json = response.payment_requirements_json()?;
-    let requirements: PaymentRequirementsResponse =
-        serde_json::from_str(&json).context("Failed to parse payment requirements")?;
-
     let available_methods = config.available_payment_methods();
     let format = cli.output_format.resolve();
 
-    match format {
-        OutputFormat::Auto => unreachable!("Auto should be resolved"),
-        OutputFormat::Json => {
-            output_json(cli, &requirements, &available_methods)?;
+    // Collect challenges from all matching protocols
+    let handlers = PROTOCOL_REGISTRY.find_all_handlers(&response);
+    let mut challenges: Vec<Box<dyn PaymentChallenge>> = Vec::new();
+    for handler in &handlers {
+        if cli.is_verbose() && cli.should_show_output() {
+            eprintln!("Detected protocol: {}", handler.name());
         }
-        OutputFormat::Yaml => {
-            output_yaml(cli, &requirements, &available_methods)?;
+        match handler.parse_challenges(&response) {
+            Ok(parsed) => challenges.extend(parsed),
+            Err(e) => {
+                if cli.is_verbose() && cli.should_show_output() {
+                    eprintln!(
+                        "Warning: failed to parse {} challenges: {}",
+                        handler.name(),
+                        e
+                    );
+                }
+            }
         }
-        OutputFormat::Text => {
-            output_text(cli, &requirements, &available_methods)?;
+    }
+
+    if challenges.is_empty() {
+        // Fall back to raw x402 parsing for legacy display
+        let json = response.payment_requirements_json()?;
+        let requirements: PaymentRequirementsResponse =
+            serde_json::from_str(&json).context("Failed to parse payment requirements")?;
+
+        match format {
+            OutputFormat::Auto => unreachable!("Auto should be resolved"),
+            OutputFormat::Json => output_json(cli, &requirements, &available_methods)?,
+            OutputFormat::Yaml => output_yaml(cli, &requirements, &available_methods)?,
+            OutputFormat::Text => output_text(cli, &requirements, &available_methods)?,
+        }
+    } else {
+        let protocol_names: Vec<&str> = handlers.iter().map(|h| h.name()).collect();
+
+        match format {
+            OutputFormat::Auto => unreachable!("Auto should be resolved"),
+            OutputFormat::Json => {
+                output_mpp_json(cli, &protocol_names, &challenges, &available_methods)?
+            }
+            OutputFormat::Yaml => {
+                output_mpp_yaml(cli, &protocol_names, &challenges, &available_methods)?
+            }
+            OutputFormat::Text => {
+                output_mpp_text(cli, &protocol_names, &challenges, &available_methods)?
+            }
         }
     }
 
@@ -305,8 +377,18 @@ fn output_text(
             );
         }
 
-        println!("    {}: {}", "Asset".dimmed(), opt.asset);
-        println!("    {}: {}", "Pay To".dimmed(), opt.pay_to.yellow());
+        // Link asset address to explorer
+        let asset_link = address_link(&opt.asset, &opt.network);
+        println!(
+            "    {}: {} {}",
+            "Asset".dimmed(),
+            asset_link.yellow(),
+            format!("({})", opt.symbol).dimmed()
+        );
+
+        // Link pay_to address to explorer
+        let pay_to_link = address_link(&opt.pay_to, &opt.network);
+        println!("    {}: {}", "Pay To".dimmed(), pay_to_link.yellow());
 
         if !opt.description.is_empty() {
             println!("    {}: {}", "Description".dimmed(), opt.description);
@@ -339,11 +421,340 @@ fn output_text(
     Ok(())
 }
 
+/// Output format for multi-protocol challenges
+#[derive(Debug, Serialize)]
+struct MppInspectOutput {
+    protocols: Vec<String>,
+    challenges: Vec<MppChallengeOutput>,
+    configured_methods: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MppChallengeOutput {
+    protocol: String,
+    scheme: String,
+    network: String,
+    amount_atomic: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amount_human: Option<String>,
+    asset: String,
+    symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decimals: Option<u8>,
+    recipient: String,
+    description: String,
+    resource: String,
+    compatible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    challenge_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    method: Option<String>,
+}
+
+fn build_mpp_output(
+    protocol_names: &[&str],
+    challenges: &[Box<dyn PaymentChallenge>],
+    available_methods: &[PaymentMethod],
+) -> MppInspectOutput {
+    let challenge_outputs = challenges
+        .iter()
+        .map(|challenge| {
+            let network = challenge.network();
+            let asset = challenge.asset();
+            let decimals = purl_lib::constants::get_token_decimals(network, asset).ok();
+            let symbol = purl_lib::constants::get_token_symbol(network, asset)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| asset.to_string());
+
+            let amount_human = decimals.map(|dec| {
+                format!(
+                    "{} ({})",
+                    format_amount(challenge.amount(), dec, &symbol),
+                    purl_lib::network::resolve_network_alias(network)
+                )
+            });
+
+            // Get MPP-specific fields if available
+            let (challenge_id, method) = if let Some(mpp_challenge) = challenge
+                .as_any()
+                .downcast_ref::<purl_lib::mpp::MppChallenge>(
+            ) {
+                (
+                    Some(mpp_challenge.inner.id.clone()),
+                    Some(mpp_challenge.inner.method.as_str().to_string()),
+                )
+            } else {
+                (None, None)
+            };
+
+            MppChallengeOutput {
+                protocol: challenge.protocol_name().to_string(),
+                scheme: challenge.scheme().to_string(),
+                network: network.to_string(),
+                amount_atomic: challenge.amount().to_string(),
+                amount_human,
+                asset: asset.to_string(),
+                symbol,
+                decimals,
+                recipient: challenge.recipient().to_string(),
+                description: challenge.description().to_string(),
+                resource: challenge.resource().to_string(),
+                compatible: is_challenge_compatible(challenge.as_ref(), available_methods),
+                challenge_id,
+                method,
+            }
+        })
+        .collect();
+
+    MppInspectOutput {
+        protocols: protocol_names.iter().map(|s| s.to_string()).collect(),
+        challenges: challenge_outputs,
+        configured_methods: available_methods
+            .iter()
+            .map(|m| m.as_str().to_string())
+            .collect(),
+    }
+}
+
+fn output_mpp_json(
+    cli: &Cli,
+    protocol_names: &[&str],
+    challenges: &[Box<dyn PaymentChallenge>],
+    available_methods: &[PaymentMethod],
+) -> Result<()> {
+    let output = build_mpp_output(protocol_names, challenges, available_methods);
+    let pretty_json = serde_json::to_string_pretty(&output)?;
+
+    if let Some(output_file) = &cli.output {
+        std::fs::write(output_file, &pretty_json)?;
+        if cli.is_verbose() && cli.should_show_output() {
+            eprintln!("Saved to: {output_file}");
+        }
+    } else {
+        println!("{pretty_json}");
+    }
+
+    Ok(())
+}
+
+fn output_mpp_yaml(
+    cli: &Cli,
+    protocol_names: &[&str],
+    challenges: &[Box<dyn PaymentChallenge>],
+    available_methods: &[PaymentMethod],
+) -> Result<()> {
+    let output = build_mpp_output(protocol_names, challenges, available_methods);
+    let yaml_output = serde_yaml::to_string(&output)?;
+
+    if let Some(output_file) = &cli.output {
+        std::fs::write(output_file, &yaml_output)?;
+        if cli.is_verbose() && cli.should_show_output() {
+            eprintln!("Saved to: {output_file}");
+        }
+    } else {
+        println!("{yaml_output}");
+    }
+
+    Ok(())
+}
+
+fn output_mpp_text(
+    cli: &Cli,
+    protocol_names: &[&str],
+    challenges: &[Box<dyn PaymentChallenge>],
+    available_methods: &[PaymentMethod],
+) -> Result<()> {
+    let data = build_mpp_output(protocol_names, challenges, available_methods);
+
+    // When writing to file, use plain text (no ANSI codes)
+    if let Some(output_file) = &cli.output {
+        let mut output = String::new();
+        output.push_str("Payment Required (402)\n");
+        output.push_str(&format!("Protocols: {}\n", data.protocols.join(", ")));
+        output.push_str(&format!("Payment Options: {}\n", data.challenges.len()));
+        output.push_str("\nChallenges:\n");
+
+        for (i, opt) in data.challenges.iter().enumerate() {
+            output.push_str(&format!("\n  Option {}:\n", i + 1));
+            output.push_str(&format!("    Protocol: {}\n", opt.protocol));
+            output.push_str(&format!("    Scheme: {}\n", opt.scheme));
+            output.push_str(&format!("    Network: {}\n", opt.network));
+            if let Some(ref human) = opt.amount_human {
+                output.push_str(&format!(
+                    "    Amount: {} ({} atomic)\n",
+                    human, opt.amount_atomic
+                ));
+            } else {
+                output.push_str(&format!(
+                    "    Amount: {} atomic (decimals unknown)\n",
+                    opt.amount_atomic
+                ));
+            }
+            output.push_str(&format!("    Asset: {} ({})\n", opt.symbol, opt.asset));
+            output.push_str(&format!("    Recipient: {}\n", opt.recipient));
+            if !opt.description.is_empty() {
+                output.push_str(&format!("    Description: {}\n", opt.description));
+            }
+            if !opt.resource.is_empty() {
+                output.push_str(&format!("    Resource: {}\n", opt.resource));
+            }
+            if let Some(ref id) = opt.challenge_id {
+                output.push_str(&format!("    Challenge ID: {}\n", id));
+            }
+            if let Some(ref method) = opt.method {
+                output.push_str(&format!("    Method: {}\n", method));
+            }
+            if opt.compatible {
+                output.push_str("    Compatible: Yes (configured)\n");
+            } else {
+                output.push_str("    Compatible: No (not configured)\n");
+            }
+        }
+
+        output.push_str(&format!(
+            "\nConfigured payment methods: {}\n",
+            if data.configured_methods.is_empty() {
+                "None".to_string()
+            } else {
+                data.configured_methods.join(", ")
+            }
+        ));
+
+        std::fs::write(output_file, &output)?;
+        if cli.is_verbose() && cli.should_show_output() {
+            eprintln!("Saved to: {output_file}");
+        }
+        return Ok(());
+    }
+
+    // Colored output for terminal
+    println!("{}", "Payment Required (402)".yellow().bold());
+    println!(
+        "{}: {}",
+        "Protocols".bold(),
+        data.protocols.join(", ").cyan()
+    );
+    println!(
+        "{}: {}",
+        "Payment Options".bold(),
+        data.challenges.len().to_string().cyan()
+    );
+    println!();
+    println!("{}", "Challenges:".green().bold());
+
+    for (i, opt) in data.challenges.iter().enumerate() {
+        println!();
+        println!(
+            "  {} {}",
+            format!("Option {}:", i + 1).cyan().bold(),
+            opt.network.cyan()
+        );
+        println!("    {}: {}", "Protocol".dimmed(), opt.protocol);
+        println!("    {}: {}", "Scheme".dimmed(), opt.scheme);
+
+        if let Some(ref human) = opt.amount_human {
+            println!(
+                "    {}: {} {}",
+                "Amount".dimmed(),
+                human.yellow(),
+                format!("({} atomic)", opt.amount_atomic).dimmed()
+            );
+        } else {
+            println!(
+                "    {}: {} {}",
+                "Amount".dimmed(),
+                opt.amount_atomic.yellow(),
+                "atomic (decimals unknown)".dimmed()
+            );
+        }
+
+        // Link asset address to explorer
+        let asset_link = address_link(&opt.asset, &opt.network);
+        println!(
+            "    {}: {} {}",
+            "Asset".dimmed(),
+            opt.symbol.yellow(),
+            format!("({})", asset_link).dimmed()
+        );
+
+        // Link recipient address to explorer
+        let recipient_link = address_link(&opt.recipient, &opt.network);
+        println!("    {}: {}", "Recipient".dimmed(), recipient_link.yellow());
+
+        if !opt.description.is_empty() {
+            println!("    {}: {}", "Description".dimmed(), opt.description);
+        }
+        if !opt.resource.is_empty() {
+            println!("    {}: {}", "Resource".dimmed(), opt.resource);
+        }
+        if let Some(ref id) = opt.challenge_id {
+            println!("    {}: {}", "Challenge ID".dimmed(), id);
+        }
+        if let Some(ref method) = opt.method {
+            println!("    {}: {}", "Method".dimmed(), method);
+        }
+
+        if opt.compatible {
+            println!(
+                "    {}: {}",
+                "Compatible".dimmed(),
+                "Yes (configured)".green()
+            );
+        } else {
+            println!(
+                "    {}: {}",
+                "Compatible".dimmed(),
+                "No (not configured)".red()
+            );
+        }
+    }
+
+    println!();
+    let methods_str = if data.configured_methods.is_empty() {
+        "None".red().to_string()
+    } else {
+        data.configured_methods.join(", ")
+    };
+    println!("{}: {}", "Configured payment methods".bold(), methods_str);
+
+    Ok(())
+}
+
+/// Check if a challenge is compatible with configured payment methods
+fn is_challenge_compatible(
+    challenge: &dyn PaymentChallenge,
+    available_methods: &[PaymentMethod],
+) -> bool {
+    // Tempo challenges work with both Tempo and EVM wallets (EVM-compatible)
+    if challenge.is_tempo()
+        && (available_methods.contains(&PaymentMethod::Tempo)
+            || available_methods.contains(&PaymentMethod::Evm))
+    {
+        return true;
+    }
+    // EVM challenges work with EVM wallets (but not Tempo-only wallets for non-Tempo chains)
+    if challenge.is_evm() && available_methods.contains(&PaymentMethod::Evm) {
+        return true;
+    }
+    if challenge.is_solana() && available_methods.contains(&PaymentMethod::Solana) {
+        return true;
+    }
+    false
+}
+
 /// Check if a requirement is compatible with configured payment methods
 fn is_compatible_method(
     req: &purl_lib::x402::PaymentRequirements,
     available_methods: &[PaymentMethod],
 ) -> bool {
+    // Tempo challenges work with both Tempo and EVM wallets (EVM-compatible)
+    if req.is_tempo()
+        && (available_methods.contains(&PaymentMethod::Tempo)
+            || available_methods.contains(&PaymentMethod::Evm))
+    {
+        return true;
+    }
+    // EVM challenges work with EVM wallets
     if req.is_evm() && available_methods.contains(&PaymentMethod::Evm) {
         return true;
     }

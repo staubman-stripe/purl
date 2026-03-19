@@ -155,6 +155,43 @@ const BUILTIN_TOKENS: &[BuiltinToken] = &[
         symbol: "USDC",
         decimals: 6,
     },
+    // Tempo mainnet tokens
+    BuiltinToken {
+        network: crate::network::networks::TEMPO,
+        address: "0x20c000000000000000000000b9537d11c60e8b50",
+        name: "USD Coin",
+        symbol: "USDC",
+        decimals: 6,
+    },
+    // Tempo Moderato (testnet) tokens
+    BuiltinToken {
+        network: crate::network::networks::TEMPO_MODERATO,
+        address: "0x20c0000000000000000000000000000000000000",
+        name: "PathUSD",
+        symbol: "pathUSD",
+        decimals: 6,
+    },
+    BuiltinToken {
+        network: crate::network::networks::TEMPO_MODERATO,
+        address: "0x20c0000000000000000000000000000000000001",
+        name: "AlphaUSD",
+        symbol: "alphaUSD",
+        decimals: 6,
+    },
+    BuiltinToken {
+        network: crate::network::networks::TEMPO_MODERATO,
+        address: "0x20c0000000000000000000000000000000000002",
+        name: "BetaUSD",
+        symbol: "betaUSD",
+        decimals: 6,
+    },
+    BuiltinToken {
+        network: crate::network::networks::TEMPO_MODERATO,
+        address: "0x20c0000000000000000000000000000000000003",
+        name: "ThetaUSD",
+        symbol: "thetaUSD",
+        decimals: 6,
+    },
 ];
 
 /// Represents a token with its metadata

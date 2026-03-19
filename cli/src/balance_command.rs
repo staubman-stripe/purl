@@ -21,6 +21,7 @@ fn wallet_display(chain: &str, addr: &str, short_addr: &str) -> String {
                 &purl_lib::network::get_network(match chain {
                     "EVM" => "base",
                     "Solana" => "solana",
+                    "Tempo" => "tempo",
                     _ => "",
                 })
                 .and_then(|n| n.address_url(addr))
@@ -74,6 +75,19 @@ pub async fn balance_command(
             }
         }
 
+        // Tempo uses EVM-compatible addresses, so check if EVM wallet is configured
+        // but show it as a separate "Tempo" entry for clarity
+        if let Some(evm) = &config.evm {
+            if let Ok(addr) = evm.get_address() {
+                let short_addr = if addr.len() > 12 {
+                    format!("{}...{}", &addr[..6], &addr[addr.len() - 4..])
+                } else {
+                    addr.clone()
+                };
+                wallet_info.push(("Tempo", addr, short_addr));
+            }
+        }
+
         if !wallet_info.is_empty() {
             println!("{}", "Wallet".green().bold());
             for (chain, addr, short_addr) in &wallet_info {
@@ -89,33 +103,38 @@ pub async fn balance_command(
     let mut network_addresses: Vec<(Network, String)> = Vec::new();
 
     for method in &available_methods {
-        let chain_type = match method {
-            PaymentMethod::Evm => ChainType::Evm,
-            PaymentMethod::Solana => ChainType::Solana,
+        // Get chain types to check for this payment method
+        // EVM wallets can also be used for Tempo since it uses EVM-compatible addresses
+        let chain_types: Vec<ChainType> = match method {
+            PaymentMethod::Evm => vec![ChainType::Evm, ChainType::Tempo],
+            PaymentMethod::Solana => vec![ChainType::Solana],
+            PaymentMethod::Tempo => vec![ChainType::Tempo],
         };
 
-        let networks = Network::by_chain_type(chain_type, network_filter.as_deref());
-        if networks.is_empty() {
-            continue;
-        }
-
-        // Get address once per chain type
-        let check_address = match address.as_deref() {
-            Some(addr) => addr.to_string(),
-            None => {
-                let first_provider = PROVIDER_REGISTRY
-                    .find_provider(networks[0].as_str())
-                    .context(format!("No provider found for network: {}", networks[0]))?;
-                first_provider.get_address(config).context(format!(
-                    "Failed to get address for {}",
-                    first_provider.name()
-                ))?
+        for chain_type in chain_types {
+            let networks = Network::by_chain_type(chain_type, network_filter.as_deref());
+            if networks.is_empty() {
+                continue;
             }
-        };
 
-        for network in networks {
-            network_list.push(network);
-            network_addresses.push((network, check_address.clone()));
+            // Get address once per chain type
+            let check_address = match address.as_deref() {
+                Some(addr) => addr.to_string(),
+                None => {
+                    let first_provider = PROVIDER_REGISTRY
+                        .find_provider(networks[0].as_str())
+                        .context(format!("No provider found for network: {}", networks[0]))?;
+                    first_provider.get_address(config).context(format!(
+                        "Failed to get address for {}",
+                        first_provider.name()
+                    ))?
+                }
+            };
+
+            for network in networks {
+                network_list.push(network);
+                network_addresses.push((network, check_address.clone()));
+            }
         }
     }
 
