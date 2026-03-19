@@ -264,6 +264,7 @@ mod tests {
     use super::*;
     use crate::payment_provider::PaymentProvider;
     use crate::x402::{v2, PaymentRequirements as UnifiedRequirements};
+    use serial_test::serial;
 
     const TEST_EVM_KEY: &str = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
 
@@ -311,11 +312,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_dry_run_with_keystore_override() {
         let temp_dir = tempfile::TempDir::new().expect("create temp dir");
 
         // Point HOME at temp so create_keystore writes there
-        std::env::set_var("HOME", temp_dir.path());
+        // SAFETY: We use serial_test to ensure tests don't run concurrently
+        unsafe { std::env::set_var("HOME", temp_dir.path()) };
         let keystore_path =
             crate::keystore::create_keystore(TEST_EVM_KEY, "test-password", "override-wallet")
                 .expect("create keystore");
