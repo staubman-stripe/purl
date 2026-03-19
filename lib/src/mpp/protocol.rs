@@ -160,12 +160,7 @@ fn convert_mpp_to_x402(challenge: &mpp::PaymentChallenge) -> Result<serde_json::
         .and_then(|v| v.as_u64())
         .unwrap_or(42431); // Default to Tempo Moderato
 
-    // Determine network from method and chain ID
-    let network = if challenge.method.as_str() == "tempo" {
-        format!("eip155:{}", chain_id)
-    } else {
-        format!("eip155:{}", chain_id)
-    };
+    let network = format!("eip155:{}", chain_id);
 
     // Build x402 v1-compatible response
     // We use v1 format since it's simpler and sufficient
