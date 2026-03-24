@@ -10,7 +10,7 @@ release:
 	cargo build --release
 
 install:
-	cargo install --path cli
+	cargo install --locked --path cli
 
 uninstall:
 	cargo uninstall purl
