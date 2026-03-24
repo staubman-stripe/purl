@@ -60,7 +60,12 @@ pub async fn balance_command(
                 } else {
                     addr.clone()
                 };
-                wallet_info.push(("EVM", addr, short_addr));
+                let label = if available_methods.contains(&PaymentMethod::Tempo) {
+                    "Tempo"
+                } else {
+                    "EVM"
+                };
+                wallet_info.push((label, addr, short_addr));
             }
         }
 
@@ -72,19 +77,6 @@ pub async fn balance_command(
                     pubkey.clone()
                 };
                 wallet_info.push(("Solana", pubkey, short_key));
-            }
-        }
-
-        // Tempo uses EVM-compatible addresses, so check if EVM wallet is configured
-        // but show it as a separate "Tempo" entry for clarity
-        if let Some(evm) = &config.evm {
-            if let Ok(addr) = evm.get_address() {
-                let short_addr = if addr.len() > 12 {
-                    format!("{}...{}", &addr[..6], &addr[addr.len() - 4..])
-                } else {
-                    addr.clone()
-                };
-                wallet_info.push(("Tempo", addr, short_addr));
             }
         }
 
