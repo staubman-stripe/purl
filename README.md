@@ -13,7 +13,7 @@ via source
 ```bash
 git clone https://github.com/stripe/purl
 cd purl
-cargo install --path cli
+cargo install --locked --path cli
 ```
 
 Requires [Rust](https://rustup.rs/). Ensure `~/.cargo/bin` is in your PATH.
