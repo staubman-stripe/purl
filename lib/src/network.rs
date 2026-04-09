@@ -177,7 +177,7 @@ const BUILTIN_NETWORKS: &[BuiltinNetwork] = &[
         display_name: "Tempo Moderato",
         rpc_url: "https://rpc.moderato.tempo.xyz",
         aliases: &["eip155:42431"],
-        explorer_url: Some("https://explore.tempo.xyz"),
+        explorer_url: Some("https://explore.testnet.tempo.xyz"),
     },
 ];
 
@@ -854,19 +854,21 @@ mod tests {
         // Explorer URL
         assert!(tempo.explorer_url.is_some());
         let explorer = tempo.explorer_url.as_ref().unwrap();
-        assert!(explorer.contains("explore.tempo.xyz"));
+        assert!(explorer.contains("explore.testnet.tempo.xyz"));
 
         // Address URL
         let addr_url = tempo.address_url("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca");
         assert!(addr_url.is_some());
-        assert!(addr_url
-            .unwrap()
-            .contains("explore.tempo.xyz/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"));
+        assert!(addr_url.unwrap().contains(
+            "explore.testnet.tempo.xyz/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"
+        ));
 
         // Transaction URL
         let tx_url = tempo.tx_url("0x123abc");
         assert!(tx_url.is_some());
-        assert!(tx_url.unwrap().contains("explore.tempo.xyz/tx/0x123abc"));
+        assert!(tx_url
+            .unwrap()
+            .contains("explore.testnet.tempo.xyz/tx/0x123abc"));
 
         // Tempo network resolved from alias
         assert_eq!(resolve_network_alias("eip155:42431"), "tempo-moderato");

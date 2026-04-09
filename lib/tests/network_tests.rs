@@ -385,13 +385,13 @@ fn test_tempo_has_explorer_url() {
         .unwrap()
         .contains("explore.tempo.xyz/address/0x1234"));
 
-    // Testnet (shared explorer)
+    // Testnet
     let info = get_network("tempo-moderato").unwrap();
     assert!(info.explorer_url.is_some());
     assert!(info
         .tx_url("0xabc123")
         .unwrap()
-        .contains("explore.tempo.xyz/tx/0xabc123"));
+        .contains("explore.testnet.tempo.xyz/tx/0xabc123"));
 }
 
 #[test]
