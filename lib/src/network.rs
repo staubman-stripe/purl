@@ -859,9 +859,9 @@ mod tests {
         // Address URL
         let addr_url = tempo.address_url("0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca");
         assert!(addr_url.is_some());
-        assert!(addr_url
-            .unwrap()
-            .contains("explore.testnet.tempo.xyz/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"));
+        assert!(addr_url.unwrap().contains(
+            "explore.testnet.tempo.xyz/address/0xa0d741ac1dc1a173c2f523f543b1b6325d4da8ca"
+        ));
 
         // Transaction URL
         let tx_url = tempo.tx_url("0x123abc");
