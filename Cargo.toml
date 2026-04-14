@@ -18,7 +18,7 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 toml = "1.0"
 alloy = { version = "1.2", features = ["full"] }
-alloy-signer = "1.2"
+alloy-signer = "2.0"
 alloy-signer-local = "1.2"
 alloy-provider = "1.2"
 alloy-transport-http = "1.2"
