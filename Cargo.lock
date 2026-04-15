@@ -4352,9 +4352,9 @@ dependencies = [
 
 [[package]]
 name = "mpp"
-version = "0.9.0"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "477c6dde7d50d256173ff7e37256ae73ecee2a96c96011893c1911adad3cbb9a"
+checksum = "1b590084a0d72f0820180b1c800a4c92aa1ba4c03b1e27b40008e95c88cd1e58"
 dependencies = [
  "alloy",
  "base64 0.22.1",
