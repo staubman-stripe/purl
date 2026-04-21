@@ -1123,13 +1123,10 @@ dependencies = [
  "alloy-json-rpc 1.8.3",
  "alloy-transport 1.8.3",
  "itertools 0.14.0",
- "opentelemetry",
- "opentelemetry-http",
  "reqwest 0.13.2",
  "serde_json",
  "tower",
  "tracing",
- "tracing-opentelemetry",
  "url",
 ]
 
@@ -1142,10 +1139,13 @@ dependencies = [
  "alloy-json-rpc 2.0.0",
  "alloy-transport 2.0.0",
  "itertools 0.14.0",
+ "opentelemetry",
+ "opentelemetry-http",
  "reqwest 0.13.2",
  "serde_json",
  "tower",
  "tracing",
+ "tracing-opentelemetry",
  "url",
 ]
 
@@ -5585,7 +5585,7 @@ dependencies = [
  "alloy",
  "alloy-provider 2.0.0",
  "alloy-signer-local",
- "alloy-transport-http 1.8.3",
+ "alloy-transport-http 2.0.0",
  "anyhow",
  "assert_cmd",
  "base64 0.22.1",
