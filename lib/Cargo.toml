@@ -58,7 +58,7 @@ async-trait.workspace = true
 
 # Cryptography for Solana keystore encryption
 aes = "0.8"
-ctr = "0.9"
+ctr = "0.10"
 scrypt = "0.12"
 sha3.workspace = true
 
