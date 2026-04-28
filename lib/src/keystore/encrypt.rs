@@ -179,7 +179,7 @@ pub fn create_solana_keystore(keypair_b58: &str, password: &str, name: &str) -> 
     use aes09::Aes128;
     use ctr::cipher::{KeyIvInit, StreamCipher};
     use ctr::Ctr128BE;
-    use rand::RngCore;
+    use rand::Rng;
     use scrypt::{scrypt, Params};
     use sha3::{Digest, Keccak256};
 
