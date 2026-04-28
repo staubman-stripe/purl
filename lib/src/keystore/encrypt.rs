@@ -176,7 +176,8 @@ pub fn decrypt_keystore(keystore_path: &Path, password: Option<&str>) -> Result<
 /// Uses the same encryption scheme as EVM keystores (scrypt + AES-128-CTR)
 /// but stores the full 64-byte Solana keypair.
 pub fn create_solana_keystore(keypair_b58: &str, password: &str, name: &str) -> Result<PathBuf> {
-    use aes::cipher::{KeyIvInit, StreamCipher};
+    use aes09::Aes128;
+    use ctr::cipher::{KeyIvInit, StreamCipher};
     use ctr::Ctr128BE;
     use rand::RngCore;
     use scrypt::{scrypt, Params};
@@ -216,7 +217,8 @@ pub fn create_solana_keystore(keypair_b58: &str, password: &str, name: &str) -> 
 
     // Encrypt keypair with AES-128-CTR using first 16 bytes of derived key
     let mut ciphertext = keypair_bytes.clone();
-    let mut cipher = Ctr128BE::<aes::Aes128>::new(derived_key[..16].into(), iv.as_slice().into());
+    let mut cipher = Ctr128BE::<Aes128>::new_from_slices(&derived_key[..16], &iv)
+        .map_err(|e| PurlError::ConfigMissing(format!("Failed to initialize cipher: {e}")))?;
     cipher.apply_keystream(&mut ciphertext);
 
     // Create MAC using Keccak256 over (derived_key[16..32] || ciphertext)
@@ -273,7 +275,8 @@ pub fn create_solana_keystore(keypair_b58: &str, password: &str, name: &str) -> 
 /// * `keystore_path` - Path to the Solana keystore file
 /// * `password` - Optional password. If None, prompts the user with retry on failure.
 pub fn decrypt_solana_keystore(keystore_path: &Path, password: Option<&str>) -> Result<Vec<u8>> {
-    use aes::cipher::{KeyIvInit, StreamCipher};
+    use aes09::Aes128;
+    use ctr::cipher::{KeyIvInit, StreamCipher};
     use ctr::Ctr128BE;
     use scrypt::{scrypt, Params};
     use sha3::{Digest, Keccak256};
@@ -373,7 +376,7 @@ pub fn decrypt_solana_keystore(keystore_path: &Path, password: Option<&str>) -> 
         // Decrypt
         let mut plaintext = ciphertext.clone();
         let mut cipher =
-            Ctr128BE::<aes::Aes128>::new(derived_key[..16].into(), iv.as_slice().into());
+            Ctr128BE::<Aes128>::new_from_slices(&derived_key[..16], &iv).map_err(|_| ())?;
         cipher.apply_keystream(&mut plaintext);
         Ok(plaintext)
     };
