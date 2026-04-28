@@ -208,7 +208,7 @@ pub fn create_solana_keystore(keypair_b58: &str, password: &str, name: &str) -> 
 
     // Derive key using scrypt (matching eth_keystore parameters)
     // n=262144 (2^18), r=8, p=1, dklen=32
-    let params = Params::new(18, 8, 1, 32)
+    let params = Params::new(18, 8, 1)
         .map_err(|e| PurlError::ConfigMissing(format!("Invalid scrypt params: {e}")))?;
     let mut derived_key = [0u8; 32];
     scrypt(password.as_bytes(), &salt, &params, &mut derived_key)
@@ -350,7 +350,7 @@ pub fn decrypt_solana_keystore(keystore_path: &Path, password: Option<&str>) -> 
         .ok_or_else(|| PurlError::InvalidKey("Missing p parameter".to_string()))?
         as u32;
 
-    let params = Params::new(log_n, r, p, 32)
+    let params = Params::new(log_n, r, p)
         .map_err(|e| PurlError::InvalidKey(format!("Invalid scrypt params: {e}")))?;
 
     // Helper to attempt decryption with a given password
