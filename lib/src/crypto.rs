@@ -100,7 +100,7 @@ impl KeyGenerator for SolanaKeyGenerator {
 /// Returns (private_key_hex, address)
 pub fn generate_evm_key() -> Result<(String, String)> {
     use alloy_signer_local::PrivateKeySigner;
-    use rand::Rng;
+    use rand::RngExt;
 
     let mut rng = rand::rng();
     let key_bytes: [u8; EVM_PRIVATE_KEY_BYTES] = rng.random();

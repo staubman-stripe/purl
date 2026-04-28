@@ -330,7 +330,7 @@ pub fn add_command(
         WalletType::Evm | WalletType::Tempo => {
             let key = if is_generate {
                 use alloy_signer_local::PrivateKeySigner;
-                use rand::Rng;
+                use rand::RngExt;
 
                 let mut rng = rand::rng();
                 let key_bytes: [u8; 32] = rng.random();
