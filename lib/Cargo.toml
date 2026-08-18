@@ -80,4 +80,4 @@ bincode = { workspace = true, optional = true }
 [dev-dependencies]
 serde_json.workspace = true
 tempfile = "3.24"
-serial_test = "3.2"
+serial_test = "4.0"
