@@ -7,6 +7,7 @@ use crate::error::{PurlError, Result};
 use crate::http::HttpResponse;
 use crate::protocol::{CredentialPayload, PaymentChallenge, PaymentProtocol};
 
+use super::policy::{decode_and_validate, require_recipient};
 use super::MppChallenge;
 
 /// Protocol name constant for MPP
@@ -130,11 +131,7 @@ impl PaymentProtocol for MppProtocol {
 ///
 /// This allows the existing negotiator to work with MPP challenges.
 fn convert_mpp_to_x402(challenge: &mpp::PaymentChallenge) -> Result<serde_json::Value> {
-    // Decode the request field to get payment details
-    let request: serde_json::Value = challenge
-        .request
-        .decode_value()
-        .map_err(|e| PurlError::Http(format!("Failed to decode MPP request: {}", e)))?;
+    let request = decode_and_validate(challenge)?;
 
     // Extract fields from the request
     let amount = request
@@ -147,11 +144,7 @@ fn convert_mpp_to_x402(challenge: &mpp::PaymentChallenge) -> Result<serde_json::
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let recipient = request
-        .get("recipient")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let recipient = require_recipient(&request)?.to_string();
 
     // Get chain ID from methodDetails if available
     let chain_id = request
@@ -247,6 +240,80 @@ mod tests {
         let body = r#"{"x402Version": 1, "error": "Payment Required", "accepts": []}"#;
         let response = make_response(402, vec![], body);
         assert!(!protocol.should_handle(&response));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_parse_rejects_tempo_split_payments_on_all_paths() {
+        use mpp::protocol::core::Base64UrlJson;
+
+        let request = Base64UrlJson::from_value(&serde_json::json!({
+            "amount": "1000000",
+            "currency": "0x20c0000000000000000000000000000000000000",
+            "recipient": "0x1111111111111111111111111111111111111111",
+            "methodDetails": {
+                "chainId": 42431,
+                "feePayer": true,
+                "splits": [{
+                    "amount": "999999",
+                    "recipient": "0x2222222222222222222222222222222222222222"
+                }]
+            }
+        }))
+        .unwrap();
+        let challenge = mpp::PaymentChallenge::new(
+            "test-id".to_string(),
+            "https://example.com/api",
+            "tempo",
+            "charge",
+            request,
+        );
+        let header = mpp::format_www_authenticate(&challenge).unwrap();
+        let response = make_response(402, vec![("www-authenticate", &header)], "");
+        let protocol = MppProtocol;
+
+        let native_error = protocol.parse_challenges(&response).unwrap_err();
+        let legacy_error = protocol.parse_challenge_json(&response).unwrap_err();
+
+        assert!(native_error
+            .to_string()
+            .contains("split-payment challenges"));
+        assert!(legacy_error
+            .to_string()
+            .contains("split-payment challenges"));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_parse_rejects_missing_recipient_on_all_paths() {
+        use mpp::protocol::core::Base64UrlJson;
+
+        let request = Base64UrlJson::from_value(&serde_json::json!({
+            "amount": "1000000",
+            "currency": "0x20c0000000000000000000000000000000000000",
+            "methodDetails": { "chainId": 42431 }
+        }))
+        .unwrap();
+        let challenge = mpp::PaymentChallenge::new(
+            "test-id".to_string(),
+            "https://example.com/api",
+            "tempo",
+            "charge",
+            request,
+        );
+        let header = mpp::format_www_authenticate(&challenge).unwrap();
+        let response = make_response(402, vec![("www-authenticate", &header)], "");
+        let protocol = MppProtocol;
+
+        let native_error = protocol.parse_challenges(&response).unwrap_err();
+        let legacy_error = protocol.parse_challenge_json(&response).unwrap_err();
+
+        assert!(native_error
+            .to_string()
+            .contains("did not provide a recipient"));
+        assert!(legacy_error
+            .to_string()
+            .contains("did not provide a recipient"));
     }
 
     #[test]
