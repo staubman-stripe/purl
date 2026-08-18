@@ -37,6 +37,33 @@ impl TempoProvider {
         let evm_config = config.require_evm()?;
         evm_config.load_signer(config.password.as_deref())
     }
+
+    /// Require a native MPP challenge and reject semantics purl cannot safely show.
+    ///
+    /// `MppChallenge::recipient` is a snapshot taken when the challenge was parsed, but
+    /// the signer pays from `inner` — mpp-rs re-decodes the request itself. Comparing the
+    /// two here makes "what purl displayed is what purl signs" an enforced invariant
+    /// rather than a coincidence of both sides reading the same field.
+    fn validate_challenge(challenge: &dyn PaymentChallenge) -> Result<&MppChallenge> {
+        let mpp_challenge = challenge
+            .as_any()
+            .downcast_ref::<MppChallenge>()
+            .ok_or_else(|| {
+                PurlError::InvalidConfig("Tempo provider requires an MppChallenge".to_string())
+            })?;
+
+        let request = crate::mpp::policy::decode_and_validate(&mpp_challenge.inner)?;
+        let signed_recipient = crate::mpp::policy::require_recipient(&request)?;
+
+        if signed_recipient != mpp_challenge.recipient {
+            return Err(PurlError::invalid_address(format!(
+                "MPP challenge recipient mismatch: purl would display {} but the challenge pays {}",
+                mpp_challenge.recipient, signed_recipient
+            )));
+        }
+
+        Ok(mpp_challenge)
+    }
 }
 
 #[async_trait]
@@ -52,25 +79,22 @@ impl PaymentProvider for TempoProvider {
         challenge: &dyn PaymentChallenge,
         config: &Config,
     ) -> Result<PaymentPayload> {
-        let signer = Self::load_signer(config)?;
+        // Require and validate the native challenge before loading a wallet or signing.
+        // MppChallenge fields are public, so callers can construct one without using
+        // the protocol parser that normally performs this validation.
+        let mpp_challenge = Self::validate_challenge(challenge)?;
 
         // Resolve RPC URL from network registry based on the challenge's network
         let rpc_url = get_network(challenge.network())
             .map(|n| n.rpc_url.clone())
             .unwrap_or_else(|| "https://rpc.tempo.xyz".to_string());
 
+        let signer = Self::load_signer(config)?;
+
         // Create mpp-rs TempoProvider
         let mpp_provider =
             mpp::client::TempoProvider::new(signer.clone(), &rpc_url).map_err(|e| {
                 PurlError::InvalidConfig(format!("Failed to create Tempo provider: {}", e))
-            })?;
-
-        // Require native MPP challenge - no protocol conversion
-        let mpp_challenge = challenge
-            .as_any()
-            .downcast_ref::<MppChallenge>()
-            .ok_or_else(|| {
-                PurlError::InvalidConfig("Tempo provider requires an MppChallenge".to_string())
             })?;
 
         // Execute payment using native MPP challenge
@@ -105,6 +129,7 @@ impl PaymentProvider for TempoProvider {
     }
 
     fn dry_run(&self, challenge: &dyn PaymentChallenge, config: &Config) -> Result<DryRunInfo> {
+        Self::validate_challenge(challenge)?;
         let evm_config = config.require_evm()?;
 
         // Validate amount is a parseable number
@@ -190,5 +215,107 @@ impl PaymentProvider for TempoProvider {
             balance_human,
             asset: token_config.currency.symbol.to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mpp::protocol::core::Base64UrlJson;
+
+    /// Build an `MppChallenge` directly, bypassing the protocol parser, with an
+    /// arbitrary `recipient` snapshot so display/signing divergence can be tested.
+    fn hand_built_challenge(
+        request_json: serde_json::Value,
+        displayed_recipient: &str,
+    ) -> MppChallenge {
+        let request = Base64UrlJson::from_value(&request_json).unwrap();
+        let inner = mpp::PaymentChallenge::new(
+            "test-id".to_string(),
+            "https://example.com/api",
+            "tempo",
+            "charge",
+            request,
+        );
+        MppChallenge {
+            inner,
+            network: "eip155:42431".to_string(),
+            amount: "1000000".to_string(),
+            asset: "0x20c0000000000000000000000000000000000000".to_string(),
+            recipient: displayed_recipient.to_string(),
+            resource: "https://example.com/api".to_string(),
+            description: String::new(),
+        }
+    }
+
+    /// Assert both signing entry points reject a challenge for the expected reason.
+    async fn assert_both_paths_reject(challenge: &MppChallenge, expected: &str) {
+        let create_error = TempoProvider::new()
+            .create_payment(challenge, &Config::default())
+            .await
+            .unwrap_err();
+        let dry_run_error = TempoProvider::new()
+            .dry_run(challenge, &Config::default())
+            .unwrap_err();
+
+        for error in [create_error, dry_run_error] {
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?}, got: {error}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_payment_rejects_manually_constructed_split_challenge() {
+        let challenge = hand_built_challenge(
+            serde_json::json!({
+                "amount": "1000000",
+                "currency": "0x20c0000000000000000000000000000000000000",
+                "recipient": "0x1111111111111111111111111111111111111111",
+                "methodDetails": {
+                    "chainId": 42431,
+                    "feePayer": true,
+                    "splits": [{
+                        "amount": "999999",
+                        "recipient": "0x2222222222222222222222222222222222222222"
+                    }]
+                }
+            }),
+            "0x1111111111111111111111111111111111111111",
+        );
+
+        assert_both_paths_reject(&challenge, "split-payment challenges").await;
+    }
+
+    #[tokio::test]
+    async fn test_rejects_challenge_whose_displayed_recipient_is_not_the_signed_one() {
+        // The snapshot purl would display points at 0x1111..., but the request the
+        // signer actually consumes pays 0x2222....
+        let challenge = hand_built_challenge(
+            serde_json::json!({
+                "amount": "1000000",
+                "currency": "0x20c0000000000000000000000000000000000000",
+                "recipient": "0x2222222222222222222222222222222222222222",
+                "methodDetails": { "chainId": 42431 }
+            }),
+            "0x1111111111111111111111111111111111111111",
+        );
+
+        assert_both_paths_reject(&challenge, "recipient mismatch").await;
+    }
+
+    #[tokio::test]
+    async fn test_rejects_challenge_with_no_recipient() {
+        let challenge = hand_built_challenge(
+            serde_json::json!({
+                "amount": "1000000",
+                "currency": "0x20c0000000000000000000000000000000000000",
+                "methodDetails": { "chainId": 42431 }
+            }),
+            "",
+        );
+
+        assert_both_paths_reject(&challenge, "did not provide a recipient").await;
     }
 }

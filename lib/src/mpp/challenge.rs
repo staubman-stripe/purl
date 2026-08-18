@@ -48,13 +48,7 @@ impl MppChallenge {
     ///
     /// Extracts relevant fields from the challenge's request payload.
     pub fn from_mpp_challenge(challenge: mpp::PaymentChallenge) -> crate::error::Result<Self> {
-        use crate::error::PurlError;
-
-        // Decode the request field to get payment details
-        let request: serde_json::Value = challenge
-            .request
-            .decode_value()
-            .map_err(|e| PurlError::Http(format!("Failed to decode MPP request: {}", e)))?;
+        let request = super::policy::decode_and_validate(&challenge)?;
 
         // Extract fields from the request
         let amount = request
@@ -67,11 +61,7 @@ impl MppChallenge {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let recipient = request
-            .get("recipient")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let recipient = super::policy::require_recipient(&request)?.to_string();
 
         // Get chain ID from methodDetails if available
         let chain_id = request
@@ -96,6 +86,20 @@ impl MppChallenge {
             description,
         })
     }
+}
+
+/// Decode an MPP challenge's base64url request payload into JSON.
+///
+/// This is a plain decode. Callers that are about to act on the result should go
+/// through [`super::policy::decode_and_validate`] instead, which applies purl's
+/// display-safety rules on top of this.
+pub(crate) fn decode_request(
+    challenge: &mpp::PaymentChallenge,
+) -> crate::error::Result<serde_json::Value> {
+    challenge
+        .request
+        .decode_value()
+        .map_err(|e| crate::error::PurlError::Http(format!("Failed to decode MPP request: {}", e)))
 }
 
 impl PaymentChallenge for MppChallenge {
@@ -168,6 +172,13 @@ mod tests {
     use super::*;
 
     fn make_challenge(method: &str, request_json: serde_json::Value) -> MppChallenge {
+        try_make_challenge(method, request_json).unwrap()
+    }
+
+    fn try_make_challenge(
+        method: &str,
+        request_json: serde_json::Value,
+    ) -> crate::error::Result<MppChallenge> {
         use mpp::protocol::core::Base64UrlJson;
         let request = Base64UrlJson::from_value(&request_json).unwrap();
         let inner = mpp::PaymentChallenge::new(
@@ -177,7 +188,7 @@ mod tests {
             "charge",
             request,
         );
-        MppChallenge::from_mpp_challenge(inner).unwrap()
+        MppChallenge::from_mpp_challenge(inner)
     }
 
     #[test]
@@ -264,13 +275,41 @@ mod tests {
 
     #[test]
     fn test_mpp_challenge_missing_fields_default() {
-        // Missing all optional fields
-        let challenge = make_challenge("tempo", serde_json::json!({}));
+        // Missing every optional field. The recipient is not optional: purl cannot
+        // display a payment destination it was never given.
+        let challenge = make_challenge("tempo", serde_json::json!({ "recipient": "0x1234" }));
 
         assert_eq!(challenge.amount(), "0");
         assert_eq!(challenge.asset(), "");
-        assert_eq!(challenge.recipient(), "");
         assert_eq!(challenge.description(), "");
+    }
+
+    /// `super::policy` owns the per-rule cases; this only proves construction is
+    /// routed through it and cannot yield an unshowable challenge.
+    #[test]
+    fn test_mpp_challenge_construction_applies_display_policy() {
+        let missing_recipient = try_make_challenge("tempo", serde_json::json!({})).unwrap_err();
+        assert!(missing_recipient
+            .to_string()
+            .contains("did not provide a recipient"));
+
+        let split_payment = try_make_challenge(
+            "tempo",
+            serde_json::json!({
+                "amount": "1000000",
+                "recipient": "0x1111111111111111111111111111111111111111",
+                "methodDetails": {
+                    "splits": [{
+                        "amount": "999999",
+                        "recipient": "0x2222222222222222222222222222222222222222"
+                    }]
+                }
+            }),
+        )
+        .unwrap_err();
+        assert!(split_payment
+            .to_string()
+            .contains("split-payment challenges"));
     }
 
     #[test]

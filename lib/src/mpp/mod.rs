@@ -4,6 +4,7 @@
 //! HTTP 402 Payment Required responses with `WWW-Authenticate: Payment` headers.
 
 pub mod challenge;
+pub(crate) mod policy;
 pub mod protocol;
 pub mod settlement;
 
